@@ -669,3 +669,9 @@ function stripSchema(s) {
 
 
 
+
+/* مُصدَّرة للاختبارات والاستخدام الخارجي */
+export {
+  partsToPlainText, toOAIMessages, toAnthropicMessages, toGeminiContents,
+  toOAITools, toAnthropicTools, toGeminiTools, noteFor, fileToTextPart,
+};

@@ -1,0 +1,26 @@
+{
+  "name": "mosaaidi-ai",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "مساعدي — تطبيق ويب (PWA) للتحدث مع نماذج الذكاء الاصطناعي بمفاتيح API الخاصة بك، مع صوت وصور وفيديو وملفات، ووكلاء بأدوات، وصفحة معاينة لتشغيل الأكواد.",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "serve": "node scripts/serve.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": [
+    "ai",
+    "pwa",
+    "openai",
+    "anthropic",
+    "gemini",
+    "agents",
+    "arabic"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^30.1.2"
+  }
+}
