@@ -85,6 +85,8 @@ export function attachRunner(iframe, { onLog } = {}) {
   const handler = (e) => {
     const d = e.data;
     if (!d || d.source !== 'mosaaidi-preview') return;
+    // نتجاهل رسائل الإطارات الأخرى (يوجد أكثر من معاينة في الصفحة)
+    try { if (iframe.contentWindow && e.source && e.source !== iframe.contentWindow) return; } catch {}
     onLog?.({ type: d.type === 'boot' ? 'info' : d.type, text: d.text, at: Date.now() });
   };
   window.addEventListener('message', handler);

@@ -2,11 +2,11 @@
 
 import * as DB from './db.js';
 import { Settings, Conversations, Messages, Assets, Artifacts, Agents, storageEstimate, askPersistent } from './db.js';
-import { PROVIDERS, getProvider, getConnection, getKeys, listModels, testConnection, availableProviders, chat, transcribe } from './providers.js';
+import { PROVIDERS, allProviders, getProvider, getConnection, getKeys, listModels, testConnection, availableProviders, chat, transcribe, getCustomProviders, loadCustomProviders, addCustomProvider, updateCustomProvider, removeCustomProvider, verifyProviderConfig } from './providers.js';
 import { fileToAttachment, attachmentDataUrl, attachmentBlob, VoiceRecorder, speak, stopSpeaking, ttsSupported } from './media.js';
 import { renderMarkdown, extractArtifacts, langLabel } from './markdown.js';
 import { TOOL_DEFS, TOOL_LIST, runAgentLoop } from './tools.js';
-import { runInFrame, stopFrame, attachRunner, artifactToHtmlFile, artifactFileName } from './preview.js';
+import { runInFrame, stopFrame, attachRunner, artifactToHtmlFile, artifactFileName, buildDoc } from './preview.js';
 import { uid, esc, fmtTime, bytes, clampText, download, copyText, debounce } from './util.js';
 
 /* ============================ الحالة ============================ */
@@ -101,6 +101,7 @@ const DEFAULTS = {
   maxTokens: 4096,
   temperature: 0.7,
   autoTitle: true,
+  autoPreview: true,
   speakReplies: false,
   agentsEnabled: true,
   fetchProxy: 'https://r.jina.ai/',
@@ -184,6 +185,7 @@ export async function openConversation(id) {
   state.messages = await Messages.byConversation(id);
   state.attachments = [];
   state.toolSteps = [];
+  state.liveRan = new Set();
   state.providerId = conv.providerId || state.settings.defaultProvider;
   state.model = conv.model || state.settings.defaultModel;
   renderConversations();
@@ -239,7 +241,7 @@ async function renderChatsHome() {
   const arts = await Artifacts.list();
   const memory = state.settings.memory || [];
   const cards = [
-    { t: '🔑 المفاتيح المضافة', d: `${avail.length} مزوّد متاح من ${PROVIDERS.length}. ${avail.length ? 'جاهز للاستخدام.' : 'أضف مفتاحًا للبدء.'}` },
+    { t: '🔑 المفاتيح المضافة', d: `${avail.length} مزوّد متاح من ${allProviders().length} (منها ${getCustomProviders().length} نموذج خاص بك). ${avail.length ? 'جاهز للاستخدام.' : 'أضف مفتاحًا للبدء.'}` },
     { t: '💬 محادثاتك', d: `${state.conversations.length} محادثة محفوظة على جهازك.` },
     { t: '🧪 مشاريع المعاينة', d: `${arts.length} كود محفوظ يمكن تشغيله فورًا.` },
     { t: '🧠 ذاكرة المساعد', d: `${memory.length} معلومة محفوظة عنك.` },
@@ -253,7 +255,9 @@ async function renderChatsHome() {
 async function renderChatHead() {
   const head = $('#chatHead');
   const avail = await availableProviders();
-  const list = avail.length ? avail : PROVIDERS;
+  const custom = getCustomProviders();
+  const list = [...new Map([...(avail.length ? avail : []), ...custom].map((p) => [p.id, p])).values()];
+  if (!list.length) list.push(...PROVIDERS);
   const prov = state.providerId;
   const models = [...new Set([...(getProvider(prov)?.models || []), state.model].filter(Boolean))];
 
@@ -269,6 +273,7 @@ async function renderChatHead() {
     <datalist id="modelList">${models.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
     <button class="icon-btn" id="refreshModels" title="جلب الموديلات من المزوّد">🔄</button>
     <span class="spacer"></span>
+    <button class="btn sm" id="autoPreviewBtn" title="تشغيل الأكواد تلقائيًا داخل الردود">🖥️ ${state.settings.autoPreview === false ? 'تلقائي: موقوف' : 'تلقائي: مفعّل'}</button>
     <button class="btn sm" id="renameConv" title="تغيير اسم المحادثة">✏️ الاسم</button>
     <button class="btn sm" id="clearConv" title="مسح رسائل هذه المحادثة">🧹</button>
   `;
@@ -302,6 +307,12 @@ async function renderChatHead() {
     $('#modelList').innerHTML = m.map((x) => `<option value="${esc(x)}"></option>`).join('');
     toast(fromApi ? `تم جلب ${m.length} موديل من المزوّد` : `القائمة المقترحة (${m.length} موديل)`);
   };
+  $('#autoPreviewBtn').onclick = async () => {
+    const on = state.settings.autoPreview === false;
+    await setSetting('autoPreview', on);
+    renderChatHead();
+    toast(on ? 'المعاينة التلقائية مفعّلة — أي كود من الردود سيعمل تلقائيًا' : 'المعاينة التلقائية موقوفة');
+  };
   $('#renameConv').onclick = renameCurrentConversation;
   $('#clearConv').onclick = async () => {
     await Messages.removeByConversation(state.current.id);
@@ -329,6 +340,25 @@ function updateHint() {
 
 /* ============================ عرض الرسائل ============================ */
 const codeRegistry = new Map(); // key -> {lang, code}
+const liveRunners = new Map(); // key -> دالة إلغاء الاستماع للسجل
+
+/* هل هذا الكود قابل للتشغيل في المتصفح؟ */
+const isLiveRunnable = (lang) => ['html', 'htm', 'svg', 'xml', 'css', 'js', 'javascript', 'mjs', 'jsx'].includes((lang || '').toLowerCase());
+
+/* إنشاء كتلة معاينة حيّة */
+function liveBlockHtml(key, lang) {
+  const running = liveRunners.has(key);
+  return `<div class="code-live" data-live="${key}">
+    <div class="live-bar">
+      <span class="badge ${running ? 'ok' : ''}">🖥️ معاينة حيّة</span>
+      <button class="btn sm ok" data-run-live="${key}">${running ? '🔄 إعادة تشغيل' : '▶️ تشغيل هنا'}</button>
+      <button class="btn sm" data-stop-live="${key}" ${running ? '' : 'hidden'}>⏹ إيقاف</button>
+      <button class="btn sm" data-open-preview="${key}">🪟 في صفحة المعاينة</button>
+      <button class="btn sm" data-full-live="${key}">⛶ ملء العرض</button>
+    </div>
+    <div class="live-body"></div>
+  </div>`;
+}
 
 function partHtml(p, msgId) {
   if (p.type === 'text') return '';
@@ -349,15 +379,16 @@ function messageBodyHtml(m) {
     html += renderMarkdown(text, {
       onCodeBlock: (b, i) => {
         const key = `${msgId}:${i}`;
-        codeRegistry.set(key, b);
+        codeRegistry.set(key, { lang: b.lang, code: b.raw !== undefined ? b.raw : b.code });
         const runnable = b.lang && ['html', 'htm', 'svg', 'xml', 'css', 'js', 'javascript', 'mjs'].includes(b.lang);
         return `<div class="code-block">
           <div class="code-actions">
             <span class="badge">${esc(langLabel(b.lang))}</span>
             <button class="btn sm" data-copy="${key}">📋 نسخ</button>
             <button class="btn sm" data-copy-file="${key}">⬇️ تنزيل</button>
-            ${runnable ? `<button class="btn sm ok" data-run="${key}">▶️ تشغيل في المعاينة</button>` : ''}
+            ${runnable ? `<button class="btn sm" data-run="${key}">📌 حفظ في مكتبة المعاينة</button>` : ''}
           </div>
+          ${runnable ? liveBlockHtml(key, b.lang) : ''}
           <pre><code class="lang-${esc(b.lang)}">${b.code}</code></pre>
         </div>`;
       },
@@ -393,6 +424,9 @@ function renderMessage(m) {
 
 export function renderMessages() {
   const box = $('#messages');
+  // تنظيف مستمعي المعاينات القديمة (الإطارات تُدمَّر مع إعادة الرسم)
+  for (const off of liveRunners.values()) { try { off(); } catch {} }
+  liveRunners.clear();
   if (!state.current) { box.innerHTML = ''; return; }
   if (!state.messages.length) {
     box.innerHTML = `<div class="empty">
@@ -404,6 +438,7 @@ export function renderMessages() {
   }
   box.innerHTML = state.messages.map(renderMessage).join('');
   wireMessageActions();
+  autoRunLivePreviews();
 }
 
 function wireMessageActions() {
@@ -418,15 +453,35 @@ function wireMessageActions() {
       download(`code-${Date.now()}.${ext}`, c.code, 'text/plain;charset=utf-8');
     };
   });
+  $$('#messages [data-run-live]').forEach((b) => {
+    b.onclick = () => runLivePreview(b.dataset.runLive);
+  });
+  $$('#messages [data-stop-live]').forEach((b) => {
+    b.onclick = () => stopLivePreview(b.dataset.stopLive);
+  });
+  $$('#messages [data-full-live]').forEach((b) => {
+    b.onclick = () => {
+      const block = document.querySelector(`[data-live="${b.dataset.fullLive}"] iframe`);
+      if (block) block.style.height = block.style.height === '80vh' ? '' : '80vh';
+    };
+  });
+  $$('#messages [data-open-preview]').forEach((b) => {
+    b.onclick = async () => {
+      const c = codeRegistry.get(b.dataset.openPreview);
+      if (!c) return;
+      const art = await ensureArtifact(c, 'كود من المحادثة');
+      goto('preview');
+      setTimeout(() => selectArtifact(art.id), 60);
+    };
+  });
   $$('#messages [data-run]').forEach((b) => {
     b.onclick = async () => {
       const c = codeRegistry.get(b.dataset.run);
       if (!c) return;
-      const art = await Artifacts.add({ title: `كود من المحادثة`, lang: c.lang || 'html', code: c.code, kind: 'web', conversationId: state.current?.id || '' });
-      state.artifacts = await Artifacts.list();
+      const art = await ensureArtifact(c, 'كود من المحادثة');
       goto('preview');
       setTimeout(() => selectArtifact(art.id), 60);
-      toast('تم فتح الكود في صفحة المعاينة');
+      toast('تم حفظ الكود في مكتبة المعاينة');
     };
   });
   $$('#messages [data-msg-copy]').forEach((b) => {
@@ -745,6 +800,12 @@ async function runTurn({ providerId, model, agent }) {
   scrollMessages();
   await Conversations.touch(state.current.id);
 
+  // كل كود في الرد يُحفظ تلقائيًا في مكتبة المعاينة
+  try {
+    const arts = await persistArtifactsFromMessage(saved);
+    if (arts.length && state.view === 'chat') toast(`🖥️ جاهز للتشغيل: ${arts.length} كود في المعاينة`);
+  } catch (e) { console.warn(e); }
+
   if (state.settings.speakReplies && finalText) { try { speak(finalText); } catch {} }
   if (failure) toast('حدث خطأ — راجع الرسالة', 5000);
 }
@@ -837,8 +898,9 @@ export function renderAgents() {
 async function agentModal(agent) {
   const isNew = !agent;
   const a = agent || { name: '', emoji: '🤖', system: '', tools: [], temperature: 0.4, providerId: '', model: '' };
-  const avail = await availableProviders();
-  const provList = avail.length ? avail : PROVIDERS;
+  const provList = await availableProviders();
+  const merged = [...new Map([...(provList.length ? provList : []), ...getCustomProviders()].map((p) => [p.id, p])).values()];
+  const listForAgent = merged.length ? merged : PROVIDERS;
   const body = `
     <div class="row">
       <div class="field" style="max-width:110px"><label>الرمز</label><input id="agEmoji" value="${esc(a.emoji)}" /></div>
@@ -846,7 +908,7 @@ async function agentModal(agent) {
     </div>
     <div class="field"><label>التعليمات (System Prompt)</label><textarea id="agSystem" rows="5" placeholder="أنت مساعد متخصص في…">${esc(a.system)}</textarea></div>
     <div class="row">
-      <div class="field"><label>المزوّد (اختياري)</label><select id="agProvider"><option value="">— الافتراضي —</option>${provList.map((p) => `<option value="${p.id}" ${a.providerId === p.id ? 'selected' : ''}>${p.emoji} ${esc(p.label)}</option>`).join('')}</select></div>
+      <div class="field"><label>المزوّد (اختياري)</label><select id="agProvider"><option value="">— الافتراضي —</option>${listForAgent.map((p) => `<option value="${p.id}" ${a.providerId === p.id ? 'selected' : ''}>${p.emoji} ${esc(p.label)}</option>`).join('')}</select></div>
       <div class="field"><label>الموديل (اختياري)</label><input id="agModel" value="${esc(a.model)}" placeholder="gpt-4o" /></div>
       <div class="field" style="max-width:130px"><label>الإبداع</label><input id="agTemp" type="number" step="0.1" min="0" max="2" value="${a.temperature}" /></div>
     </div>
@@ -881,6 +943,114 @@ async function agentModal(agent) {
   });
 }
 
+/* ============================ المعاينة الحيّة داخل الردود ============================ */
+function simpleHash(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return 'h' + (h >>> 0).toString(36) + '_' + str.length;
+}
+
+/* تشغيل كود داخل كتلة في الرد نفسه */
+function runLivePreview(key) {
+  const c = codeRegistry.get(key);
+  const block = document.querySelector(`[data-live="${key}"]`);
+  if (!c || !block) return null;
+  const body = block.querySelector('.live-body');
+  body.innerHTML = '';
+
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-popups allow-downloads');
+  iframe.setAttribute('title', 'معاينة حيّة');
+  body.appendChild(iframe);
+
+  const logBox = document.createElement('div');
+  logBox.className = 'pv-log';
+  logBox.textContent = 'سجل التشغيل…';
+  body.appendChild(logBox);
+
+  const prev = liveRunners.get(key);
+  if (prev) { try { prev(); } catch {} }
+  const off = attachRunner(iframe, {
+    onLog: (l) => {
+      const line = (l.type === 'error' ? '❌ ' : l.type === 'warn' ? '⚠️ ' : '› ') + l.text;
+      logBox.textContent = (logBox.textContent === 'سجل التشغيل…' ? '' : logBox.textContent + '\n') + line;
+      logBox.scrollTop = logBox.scrollHeight;
+    },
+  });
+  liveRunners.set(key, off);
+  iframe.srcdoc = buildDoc({ lang: c.lang, code: c.code });
+
+  const bar = block.querySelector('.live-bar');
+  if (bar) {
+    bar.querySelector('[data-run-live]').textContent = '🔄 إعادة تشغيل';
+    const badge = bar.querySelector('.badge');
+    if (badge) badge.classList.add('ok');
+    const stop = bar.querySelector('[data-stop-live]');
+    if (stop) stop.hidden = false;
+  }
+  if (!state.liveRan) state.liveRan = new Set();
+  state.liveRan.add(key);
+  return iframe;
+}
+
+function stopLivePreview(key) {
+  const off = liveRunners.get(key);
+  if (off) { try { off(); } catch {} liveRunners.delete(key); }
+  const block = document.querySelector(`[data-live="${key}"]`);
+  if (!block) return;
+  block.querySelector('.live-body').innerHTML = '';
+  const bar = block.querySelector('.live-bar');
+  if (bar) {
+    bar.querySelector('[data-run-live]').textContent = '▶️ تشغيل هنا';
+    const badge = bar.querySelector('.badge');
+    if (badge) badge.classList.remove('ok');
+    const stop = bar.querySelector('[data-stop-live]');
+    if (stop) stop.hidden = true;
+  }
+}
+
+/* تشغيل تلقائي لآخر كود كتبه الذكاء الاصطناعي */
+function autoRunLivePreviews() {
+  if (state.settings.autoPreview === false) return;
+  if (!state.liveRan) state.liveRan = new Set();
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    const m = state.messages[i];
+    if (m.role !== 'assistant') continue;
+    const keys = [...codeRegistry.keys()].filter((k) => k.startsWith(m.id + ':'));
+    const first = keys.find((k) => { const c = codeRegistry.get(k); return c && isLiveRunnable(c.lang); });
+    if (first && !state.liveRan.has(first)) runLivePreview(first);
+    return;
+  }
+}
+
+/* حفظ كود في مكتبة المعاينة (مع منع التكرار) */
+async function ensureArtifact(c, title) {
+  const hash = simpleHash((c.lang || '') + '|' + c.code);
+  const convId = state.current?.id || '';
+  const dup = (state.artifacts || []).find((a) => a.hash === hash && a.conversationId === convId);
+  if (dup) return dup;
+  const art = await Artifacts.add({ title, lang: c.lang || 'html', code: c.code, kind: 'web', conversationId: convId, hash });
+  state.artifacts = [art, ...(state.artifacts || [])];
+  return art;
+}
+
+/* عند وصول رد جديد: كل كود قابل للتشغيل يُحفظ تلقائيًا في مكتبة المعاينة */
+async function persistArtifactsFromMessage(msg) {
+  const text = (msg.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
+  if (!text || !/<[a-zA-Z!/]|function |=>|console\./.test(text)) return [];
+  const found = extractArtifacts(text).filter((f) => isLiveRunnable(f.lang));
+  const saved = [];
+  for (const f of found) {
+    const hash = simpleHash(f.lang + '|' + f.code);
+    const dup = (state.artifacts || []).find((a) => a.hash === hash && a.conversationId === msg.conversationId);
+    if (dup) { saved.push(dup); continue; }
+    const art = await Artifacts.add({ title: f.title, lang: f.lang, code: f.code, kind: f.kind, conversationId: msg.conversationId, hash, auto: true });
+    state.artifacts = [art, ...(state.artifacts || [])];
+    saved.push(art);
+  }
+  return saved;
+}
+
 /* ============================ صفحة المعاينة (Preview) ============================ */
 let previewLogs = [];
 let previewRunnerOff = null;
@@ -894,7 +1064,7 @@ export async function renderPreview() {
   view.innerHTML = `
     <div class="section">
       <h2>🧪 صفحة المعاينة</h2>
-      <p class="sub">هنا تُشغَّل الأكواد التي يكتبها لك الذكاء الاصطناعي (HTML/CSS/JavaScript) داخل إطار معزول وآمن، وتشاهد المخرجات والأخطاء مباشرة.</p>
+      <p class="sub">كل كود يكتبه لك الذكاء الاصطناعي يُحفظ هنا تلقائيًا مع رابط لمحادثته، ويُشغَّل داخل إطار معزول وآمن. والأسرع: المعاينة تعمل مباشرة تحت الكود في الرد نفسه — بدون ما تسيب المحادثة.</p>
       <div class="row">
         <button class="btn primary" id="runArt">▶️ تشغيل</button>
         <button class="btn" id="stopArt">⏹ إيقاف</button>
@@ -979,14 +1149,24 @@ function renderArtifactList() {
   const box = $('#artList');
   if (!box) return;
   if (!state.artifacts.length) { box.innerHTML = '<div class="empty">لا توجد أكواد بعد. اطلب من النموذج كتابة كود، أو أضف كودًا يدويًا.</div>'; return; }
-  box.innerHTML = state.artifacts.map((a) => `
+  box.innerHTML = state.artifacts.map((a) => {
+    const conv = state.conversations.find((c) => c.id === a.conversationId);
+    return `
     <div class="list-item art-item" data-art="${a.id}" style="${a.id === state.previewId ? 'border-color:var(--acc)' : ''}">
       <div style="font-size:20px">${a.kind === 'web' ? '🌐' : '📜'}</div>
-      <div class="li-main"><b>${esc(a.title)}</b><small>${esc(langLabel(a.lang))} • ${fmtTime(a.createdAt)}</small></div>
+      <div class="li-main">
+        <b>${esc(a.title)} ${a.auto ? '<span class="badge ok">من رد الذكاء الاصطناعي</span>' : ''}</b>
+        <small>${esc(langLabel(a.lang))} • ${fmtTime(a.createdAt)}${conv ? ' • 💬 ' + esc(clampText(conv.title, 28)) : ''}</small>
+      </div>
+      ${conv ? `<button class="btn sm" data-goconv="${conv.id}">💬 الرد</button>` : ''}
       <button class="btn sm" data-open="${a.id}">فتح</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   box.querySelectorAll('[data-art]').forEach((el) => {
-    el.onclick = () => selectArtifact(el.dataset.art);
+    el.onclick = (e) => { if (e.target.dataset.goconv) return; selectArtifact(el.dataset.art); };
+  });
+  box.querySelectorAll('[data-goconv]').forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); openConversation(b.dataset.goconv); };
   });
 }
 
@@ -1064,10 +1244,17 @@ async function renderSettings() {
     </div>
 
     <div class="section">
+      <h2>🧩 نماذجي الخاصة</h2>
+      <p class="sub">أضف أي نموذج بنفسك بعيدًا عن القائمة الجاهزة: اكتب الاسم، الرابط (Base URL)، المفتاح، واسم الموديل، ثم اضغط <b>تحقق</b> للتأكد من أنه يعمل. يظهر فورًا في قائمة المزوّدين عند إنشاء محادثة أو وكيل.</p>
+      <div id="customList"></div>
+      <button class="btn primary" id="addCustom" style="margin-top:10px">＋ إضافة نموذج خاص</button>
+    </div>
+
+    <div class="section">
       <h2>⚙️ الافتراضيات</h2>
       <p class="sub">ما يُستخدم في المحادثات الجديدة.</p>
       <div class="row">
-        <div class="field"><label>المزوّد الافتراضي</label><select id="defProvider">${PROVIDERS.map((p) => `<option value="${p.id}" ${state.settings.defaultProvider === p.id ? 'selected' : ''}>${p.emoji} ${esc(p.label)}</option>`).join('')}</select></div>
+        <div class="field"><label>المزوّد الافتراضي</label><select id="defProvider">${allProviders().map((p) => `<option value="${p.id}" ${state.settings.defaultProvider === p.id ? 'selected' : ''}>${p.emoji} ${esc(p.label)}${p.custom ? ' (خاص)' : ''}</option>`).join('')}</select></div>
         <div class="field"><label>الموديل الافتراضي</label><input id="defModel" value="${esc(state.settings.defaultModel)}" /></div>
       </div>
       <div class="row">
@@ -1076,6 +1263,7 @@ async function renderSettings() {
       </div>
       <div class="field"><label>تعليمات النظام (System Prompt) الافتراضية</label><textarea id="sysPrompt" rows="4">${esc(state.settings.systemPrompt)}</textarea></div>
       <label class="switch"><input type="checkbox" id="autoTitle" ${state.settings.autoTitle ? 'checked' : ''} /> تسمية المحادثات تلقائيًا من أول رسالة</label>
+      <label class="switch"><input type="checkbox" id="autoPreviewChk" ${state.settings.autoPreview !== false ? 'checked' : ''} /> 🖥️ تشغيل أكواد الذكاء الاصطناعي تلقائيًا داخل الرد (معاينة حيّة)</label>
       <label class="switch"><input type="checkbox" id="agentsEnabled" ${state.settings.agentsEnabled !== false ? 'checked' : ''} /> 🛠 تمكين أدوات الوكلاء تلقائيًا لكل النماذج (تنفيذ كود، بحث، توليد صور، ملفات، ذاكرة)</label>
       <label class="switch"><input type="checkbox" id="speakReplies" ${state.settings.speakReplies ? 'checked' : ''} /> قراءة الردود صوتيًا تلقائيًا</label>
       <label class="switch"><input type="checkbox" id="darkMode" ${state.settings.theme !== 'light' ? 'checked' : ''} /> الوضع الليلي</label>
@@ -1124,6 +1312,8 @@ async function renderSettings() {
       ${p.keyUrl ? `<a class="btn sm" href="${p.keyUrl}" target="_blank" rel="noopener">الحصول على مفتاح</a>` : ''}
     </div>`).join('');
 
+  renderCustomProviders();
+  $('#addCustom').onclick = () => customProviderModal(null);
   $('#saveKeys').onclick = saveKeys;
   view.querySelectorAll('[data-test]').forEach((b) => {
     b.onclick = async () => {
@@ -1150,6 +1340,7 @@ async function renderSettings() {
       autoTitle: $('#autoTitle').checked,
       speakReplies: $('#speakReplies').checked,
       agentsEnabled: $('#agentsEnabled').checked,
+      autoPreview: $('#autoPreviewChk').checked,
       theme: $('#darkMode').checked ? 'dark' : 'light',
     });
     state.settings = { ...state.settings, ...(await Settings.all()) };
@@ -1179,6 +1370,139 @@ async function renderSettings() {
   $('#importFile').onchange = doImport;
   $('#persistBtn').onclick = async () => { const ok = await askPersistent(); toast(ok ? 'تم تثبيت التخزين — بياناتك محمية من الحذف التلقائي' : 'المتصفح لم يمنح تثبيت التخزين'); };
   $('#wipeBtn').onclick = confirmWipe;
+}
+
+/* ============================ نماذجي الخاصة ============================ */
+function renderCustomProviders() {
+  const box = $('#customList');
+  if (!box) return;
+  const list = getCustomProviders();
+  if (!list.length) {
+    box.innerHTML = '<div class="empty">لا توجد نماذج خاصة بعد — أضف أول نموذج لك (مثال: LM Studio على جهازك، أو أي سيرفر متوافق مع OpenAI).</div>';
+    return;
+  }
+  box.innerHTML = list.map((p) => `
+    <div class="list-item">
+      <div style="font-size:24px">${p.emoji || '🧩'}</div>
+      <div class="li-main">
+        <b>${esc(p.label)} <span class="badge">${esc(p.kind === 'anthropic' ? 'Anthropic' : p.kind === 'gemini' ? 'Gemini' : 'OpenAI-compatible')}</span></b>
+        <small dir="ltr" style="display:block;direction:ltr;text-align:left">${esc(p.baseUrl || 'بدون رابط')}</small>
+        <small>${(p.models || []).length ? 'الموديلات: ' + esc((p.models || []).join(', ')) : 'لم تحدد موديلًا'}</small>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="btn sm ok" data-verify="${p.id}">🔍 تحقق</button>
+        <button class="btn sm" data-cedit="${p.id}">تعديل</button>
+        <button class="btn sm danger" data-cdel="${p.id}">حذف</button>
+      </div>
+    </div>`).join('');
+
+  box.querySelectorAll('[data-verify]').forEach((b) => {
+    b.onclick = async () => {
+      const p = getCustomProviders().find((x) => x.id === b.dataset.verify);
+      b.textContent = '…';
+      await showVerifyResult(p);
+      b.textContent = '🔍 تحقق';
+    };
+  });
+  box.querySelectorAll('[data-cedit]').forEach((b) => {
+    b.onclick = () => customProviderModal(getCustomProviders().find((x) => x.id === b.dataset.cedit));
+  });
+  box.querySelectorAll('[data-cdel]').forEach((b) => {
+    b.onclick = async () => {
+      await removeCustomProvider(b.dataset.cdel);
+      renderCustomProviders();
+      toast('تم الحذف');
+    };
+  });
+}
+
+async function showVerifyResult(cfg) {
+  toast('جارٍ التحقق من الاتصال…');
+  const r = await verifyProviderConfig(cfg);
+  const okChat = r.reply && !r.replyError;
+  const body = `
+    <div class="kv"><span>الموديل المُجرَّب</span><b>${esc(r.model || '—')}</b></div>
+    <div class="kv"><span>ردّ النموذج</span><b>${okChat ? esc(r.reply) : '—'}</b></div>
+    <div class="kv"><span>عدد الموديلات المتاحة</span><b>${r.models.length || 0}</b></div>
+    ${okChat
+      ? '<p class="badge ok" style="margin-top:10px">✅ كل شيء يعمل — النموذج جاهز للاستخدام</p>'
+      : `<p class="badge no" style="margin-top:10px">❌ لم ينجح الاتصال</p><pre style="white-space:pre-wrap;direction:ltr;text-align:left;font-size:12px">${esc(r.replyError || r.modelsError || 'خطأ غير معروف')}</pre>`}
+    ${r.modelsError ? `<div class="hint">ملاحظة عند جلب قائمة الموديلات: ${esc(r.modelsError)}</div>` : ''}
+    ${r.models.length ? `<div class="field" style="margin-top:10px"><label>أول 40 موديل متاح (اضغط لتحديد موديل افتراضي)</label><div style="max-height:180px;overflow:auto;display:flex;flex-wrap:wrap;gap:5px">${r.models.slice(0, 40).map((m) => `<span class="badge">${esc(m)}</span>`).join('')}</div></div>` : ''}
+  `;
+  openModal({
+    title: `التحقق من «${cfg.label}»`,
+    body,
+    actions: [
+      { label: 'إغلاق', onClick: closeModal },
+      { label: 'تعديل الإعدادات', className: 'primary', onClick: () => { closeModal(); customProviderModal(cfg); } },
+    ],
+  });
+  return r;
+}
+
+function customProviderModal(existing) {
+  const isNew = !existing;
+  const c = existing || { label: '', emoji: '🧩', kind: 'openai', baseUrl: '', apiKey: '', models: [], note: '', noKey: false };
+  const body = `
+    <div class="row">
+      <div class="field" style="max-width:110px"><label>الرمز</label><input id="cpEmoji" value="${esc(c.emoji || '🧩')}" /></div>
+      <div class="field"><label>اسم النموذج / المزوّد</label><input id="cpLabel" value="${esc(c.label)}" placeholder="مثال: سيرفري المحلي، DeepSeek، Groq…" /></div>
+    </div>
+    <div class="field"><label>الرابط (Base URL)</label><input id="cpBase" dir="ltr" value="${esc(c.baseUrl)}" placeholder="https://api.example.com/v1" />
+      <div class="hint">مثال: <code>http://192.168.1.5:1234/v1</code> لـ LM Studio، أو <code>https://api.groq.com/openai/v1</code>.</div></div>
+    <div class="field"><label>مفتاح API</label><input id="cpKey" dir="ltr" type="password" value="${esc(c.apiKey)}" placeholder="الصق المفتاح…" autocomplete="off" />
+      <label class="switch" style="margin-top:6px"><input type="checkbox" id="cpNoKey" ${c.noKey ? 'checked' : ''} /> لا يحتاج مفتاحًا (سيرفر محلي)</label></div>
+    <div class="field"><label>نوع الواجهة</label><select id="cpKind">
+      <option value="openai" ${c.kind === 'openai' ? 'selected' : ''}>OpenAI-compatible (الأشهر)</option>
+      <option value="anthropic" ${c.kind === 'anthropic' ? 'selected' : ''}>Anthropic (Claude)</option>
+      <option value="gemini" ${c.kind === 'gemini' ? 'selected' : ''}>Google Gemini</option>
+    </select></div>
+    <div class="field"><label>اسم الموديل (Model)</label><input id="cpModels" dir="ltr" value="${esc((c.models || []).join(', '))}" placeholder="gpt-4o-mini" />
+      <div class="hint">يمكن كتابة أكثر من موديل مفصولة بفاصلة. زر «تحقق» يجلب القائمة الحقيقية من السيرفر.</div></div>
+    <div class="field"><label>ملاحظة (اختياري)</label><input id="cpNote" value="${esc(c.note || '')}" placeholder="مثال: سريع ورخيص" /></div>
+    <div id="cpResult"></div>
+  `;
+  openModal({
+    title: isNew ? 'إضافة نموذج خاص' : 'تعديل النموذج الخاص',
+    body,
+    actions: [
+      { label: 'إلغاء', onClick: closeModal },
+      { label: '🔍 تحقق من الاتصال', onClick: async (b) => {
+        const res = $('#cpResult');
+        res.innerHTML = '<div class="hint">جارٍ التحقق…</div>';
+        const r = await verifyProviderConfig(readCustomForm());
+        const ok = r.reply && !r.replyError;
+        res.innerHTML = ok
+          ? `<p class="badge ok">✅ يعمل! ردّ الموديل «${esc(r.model)}»: ${esc(r.reply)}</p>${r.models.length ? `<div class="hint">تم العثور على ${r.models.length} موديل — سيتم حفظ أولها كافتراضي.</div>` : ''}`
+          : `<p class="badge no">❌ فشل الاتصال</p><pre style="white-space:pre-wrap;direction:ltr;text-align:left;font-size:12px">${esc(r.replyError || r.modelsError || 'خطأ غير معروف')}</pre>`;
+        if (r.models.length && !$('#cpModels').value.trim()) $('#cpModels').value = r.models[0];
+      } },
+      { label: 'حفظ', className: 'primary', onClick: async () => {
+        const data = readCustomForm();
+        if (!data.label) return toast('اكتب اسمًا للنموذج');
+        if (!data.baseUrl) return toast('اكتب الرابط (Base URL)');
+        if (isNew) await addCustomProvider(data);
+        else await updateCustomProvider(existing.id, data);
+        renderCustomProviders();
+        closeModal();
+        toast('تم الحفظ — النموذج ظاهر الآن في قائمة المزوّدين');
+      } },
+    ],
+  });
+}
+
+function readCustomForm() {
+  return {
+    label: $('#cpLabel').value.trim(),
+    emoji: $('#cpEmoji').value.trim() || '🧩',
+    baseUrl: $('#cpBase').value.trim(),
+    apiKey: $('#cpKey').value.trim(),
+    kind: $('#cpKind').value,
+    models: $('#cpModels').value.split(',').map((x) => x.trim()).filter(Boolean),
+    note: $('#cpNote').value.trim(),
+    noKey: $('#cpNoKey').checked,
+  };
 }
 
 async function saveKeys(silent = false) {
@@ -1351,6 +1675,7 @@ async function boot() {
   try {
     if (window.MosaaidiNative) document.documentElement.dataset.platform = 'android';
     await loadSettings();
+    await loadCustomProviders();
     await seedAgents();
     await loadConversations();
     state.artifacts = await Artifacts.list();

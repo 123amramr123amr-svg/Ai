@@ -134,7 +134,7 @@ export const Assets = {
 /* ---------- artifacts (أكواد صفحة المعاينة) ---------- */
 export const Artifacts = {
   async add(a) {
-    const rec = { id: a.id || 'ar_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: a.title || 'كود بدون عنوان', lang: a.lang || 'html', code: a.code || '', kind: a.kind || 'web', conversationId: a.conversationId || '', createdAt: Date.now() };
+    const rec = { id: a.id || 'ar_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), title: a.title || 'كود بدون عنوان', lang: a.lang || 'html', code: a.code || '', kind: a.kind || 'web', conversationId: a.conversationId || '', hash: a.hash || '', auto: !!a.auto, createdAt: Date.now() };
     await tx('artifacts', 'readwrite', (s) => s.put(rec));
     return rec;
   },

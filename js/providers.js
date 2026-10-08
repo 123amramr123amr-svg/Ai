@@ -91,7 +91,63 @@ export const PROVIDERS = [
   },
 ];
 
-export const getProvider = (id) => PROVIDERS.find((p) => p.id === id) || null;
+/* ============================ المزوّدون المخصّصون (نماذجي الخاصة) ============================ */
+let _custom = [];
+
+export function getCustomProviders() { return _custom || []; }
+
+export async function loadCustomProviders() {
+  const v = await Settings.get('customProviders', []);
+  _custom = Array.isArray(v) ? v : [];
+  return _custom;
+}
+
+const CUSTOM_DEFAULT_CAPS = { vision: true, audioIn: false, video: false, files: true, tools: true, imageGen: false, stt: false };
+
+export async function saveCustomProviders(list) {
+  _custom = list || [];
+  await Settings.set('customProviders', _custom);
+  return _custom;
+}
+
+export async function addCustomProvider(data) {
+  const rec = {
+    id: 'cp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    label: (data.label || 'نموذجي الخاص').trim(),
+    emoji: data.emoji || '🧩',
+    kind: data.kind || 'openai',
+    baseUrl: (data.baseUrl || '').trim().replace(/\/+$/, ''),
+    apiKey: (data.apiKey || '').trim(),
+    models: Array.isArray(data.models) ? data.models : String(data.models || '').split(',').map((x) => x.trim()).filter(Boolean),
+    note: data.note || '',
+    noKey: !!data.noKey,
+    caps: { ...CUSTOM_DEFAULT_CAPS, ...(data.caps || {}) },
+    custom: true,
+    createdAt: Date.now(),
+  };
+  const list = [..._custom, rec];
+  await saveCustomProviders(list);
+  return rec;
+}
+
+export async function updateCustomProvider(id, patch) {
+  const list = _custom.map((p) => (p.id === id ? { ...p, ...patch, id, custom: true, caps: { ...CUSTOM_DEFAULT_CAPS, ...(p.caps || {}), ...(patch.caps || {}) } } : p));
+  await saveCustomProviders(list);
+  return list.find((p) => p.id === id) || null;
+}
+
+export async function removeCustomProvider(id) {
+  await saveCustomProviders(_custom.filter((p) => p.id !== id));
+}
+
+/* كل المزوّدين: المدمجون + مزوّدوك الخاصون */
+export const allProviders = () => [...PROVIDERS, ...(_custom || [])];
+
+export const getProvider = (id) => {
+  const c = (_custom || []).find((p) => p.id === id);
+  if (c) return c;
+  return PROVIDERS.find((p) => p.id === id) || null;
+};
 
 /* ============================ المفاتيح ============================ */
 export async function getKeys() { return (await Settings.get('apiKeys', {})) || {}; }
@@ -108,6 +164,9 @@ export async function getKey(providerId) { return (await getKeys())[providerId] 
 export async function getConnection(providerId) {
   const p = getProvider(providerId);
   if (!p) return null;
+  if (p.custom) {
+    return { ...p, apiKey: p.apiKey || '', baseUrl: (p.baseUrl || '').replace(/\/+$/, '') };
+  }
   const keys = await getKeys();
   const baseUrls = (await Settings.get('baseUrls', {})) || {};
   return {
@@ -480,10 +539,9 @@ async function streamGemini({ conn, model, messages, system, tools, temperature,
 }
 
 /* ============================ الواجهة العامة ============================ */
-export async function chat({ providerId, model, messages, system, tools, temperature, maxTokens, signal, onDelta, onToolDelta }) {
-  const conn = await getConnection(providerId);
-  if (!conn) throw new Error('مزوّد غير معروف: ' + providerId);
-  if (!conn.apiKey && !conn.noKey) throw new Error(`لا يوجد مفتاح API لـ ${conn.label}. أضِفه من صفحة الإعدادات.`);
+export async function chatWithConn(conn, { model, messages, system, tools, temperature, maxTokens, signal, onDelta, onToolDelta }) {
+  if (!conn) throw new Error('مزوّد غير معروف');
+  if (!conn.apiKey && !conn.noKey) throw new Error(`لا يوجد مفتاح API لـ ${conn.label || conn.id}. أضِفه من الإعدادات.`);
   if (!conn.baseUrl) throw new Error('رابط الخدمة (Base URL) غير محدد لهذا المزوّد.');
   if (!model) throw new Error('لم تختر موديلًا بعد.');
 
@@ -491,6 +549,68 @@ export async function chat({ providerId, model, messages, system, tools, tempera
   if (conn.kind === 'anthropic') return streamAnthropic(args);
   if (conn.kind === 'gemini') return streamGemini(args);
   return streamOpenAI(args);
+}
+
+export async function chat({ providerId, model, messages, system, tools, temperature, maxTokens, signal, onDelta, onToolDelta }) {
+  const conn = await getConnection(providerId);
+  if (!conn) throw new Error('مزوّد غير معروف: ' + providerId);
+  return chatWithConn(conn, { model, messages, system, tools, temperature, maxTokens, signal, onDelta, onToolDelta });
+}
+
+/* التحقق من إعدادات مزوّد (قبل الحفظ): يجلب الموديلات ويجرّب ردًّا قصيرًا */
+export async function verifyProviderConfig(cfg) {
+  const conn = {
+    id: cfg.id || 'verify',
+    label: cfg.label || 'اختبار',
+    kind: cfg.kind || 'openai',
+    baseUrl: String(cfg.baseUrl || '').trim().replace(/\/+$/, ''),
+    apiKey: String(cfg.apiKey || '').trim(),
+    noKey: !!cfg.noKey,
+    models: Array.isArray(cfg.models) ? cfg.models : [],
+    caps: { ...CUSTOM_DEFAULT_CAPS, ...(cfg.caps || {}) },
+    custom: true,
+  };
+  const out = { models: [], modelsError: null, reply: null, replyError: null, model: null };
+  if (!conn.baseUrl) { out.modelsError = 'الرابط (Base URL) مطلوب'; return out; }
+  try {
+    if (conn.kind === 'gemini') {
+      const r = await fetch(`${conn.baseUrl}/models?key=${encodeURIComponent(conn.apiKey)}`);
+      if (!r.ok) throw await httpError(r);
+      const j = await r.json();
+      out.models = (j.models || []).map((m) => m.name.replace(/^models\//, ''));
+    } else if (conn.kind === 'anthropic') {
+      const r = await fetch(`${conn.baseUrl}/models?limit=100`, { headers: { 'x-api-key': conn.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } });
+      if (!r.ok) throw await httpError(r);
+      const j = await r.json();
+      out.models = (j.data || []).map((m) => m.id);
+    } else {
+      const headers = {};
+      if (conn.apiKey) headers.Authorization = `Bearer ${conn.apiKey}`;
+      const r = await fetch(`${conn.baseUrl}/models`, { headers });
+      if (!r.ok) throw await httpError(r);
+      const j = await r.json();
+      out.models = (j.data || j.models || []).map((m) => (typeof m === 'string' ? m : m.id)).filter(Boolean);
+    }
+  } catch (e) {
+    out.modelsError = e.message || String(e);
+  }
+
+  out.model = conn.models[0] || out.models[0] || '';
+  if (out.model) {
+    try {
+      const res = await chatWithConn(conn, {
+        model: out.model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'اكتب كلمة: تمام' }] }],
+        maxTokens: 24, temperature: 0,
+      });
+      out.reply = (res.text || '').trim() || '(رد فارغ)';
+    } catch (e) {
+      out.replyError = e.message || String(e);
+    }
+  } else {
+    out.replyError = 'لا يوجد اسم موديل للتجربة — اكتب اسم الموديل يدويًا.';
+  }
+  return out;
 }
 
 /* قائمة الموديلات من المزوّد نفسه (مع الرجوع للقائمة المقترحة عند الفشل) */
@@ -600,7 +720,9 @@ export async function transcribe({ providerId, blob, filename = 'voice.webm', mo
 export async function availableProviders() {
   const keys = await getKeys();
   const baseUrls = (await Settings.get('baseUrls', {})) || {};
-  return PROVIDERS.filter((p) => p.noKey || keys[p.id] || baseUrls[p.id]);
+  const builtin = PROVIDERS.filter((p) => p.noKey || keys[p.id] || baseUrls[p.id]);
+  const custom = (_custom || []).filter((p) => p.baseUrl && (p.noKey || p.apiKey));
+  return [...builtin, ...custom];
 }
 
 

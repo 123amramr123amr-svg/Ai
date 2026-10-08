@@ -163,3 +163,61 @@ test('smoke: الأدوات مُفعَّلة تلقائيًا في المحاد�
   assert.ok(names.includes('create_preview'), 'أداة المعاينة متاحة');
   assert.equal(body.tool_choice, 'auto');
 });
+
+test('smoke: المعاينة الحيّة تعمل تلقائيًا داخل رد الذكاء الاصطناعي', async () => {
+  globalThis.fetch = async () => sseResponse([
+    { choices: [{ delta: { content: 'اتفضل ده كود:\n\n```html\n<h1 id="x">أهلاً</h1>\n<script>console.log(1)<\/script>\n```\n' }, finish_reason: 'stop' }] },
+  ]);
+  await app.newChat({ title: 'كود تلقائي' });
+  document.querySelector('#input').value = 'اعمل لي صفحة';
+  await app.sendMessage();
+  await new Promise((r) => setTimeout(r, 200));
+
+  const live = document.querySelector('#messages [data-live]');
+  assert.ok(live, 'كتلة المعاينة الحيّة ظهرت تحت الكود');
+  const iframe = live.querySelector('iframe');
+  assert.ok(iframe, 'الإطار أُنشئ تلقائيًا بدون أي ضغط من المستخدم');
+  assert.match(iframe.getAttribute('sandbox') || '', /allow-scripts/);
+  assert.match(iframe.getAttribute('srcdoc') || '', /<h1 id="x">/);
+
+  const { Artifacts } = await import('../js/db.js');
+  const arts = await Artifacts.list();
+  const fromReply = arts.filter((a) => a.auto);
+  assert.ok(fromReply.length >= 1, 'الكود حُفظ تلقائيًا في مكتبة المعاينة');
+  assert.ok(fromReply[0].conversationId, 'مرتبط بالمحادثة');
+  assert.ok(fromReply[0].hash, 'له بصمة لمنع التكرار');
+});
+
+test('smoke: إضافة نموذج خاص (مفتاح + رابط + موديل) والتحقق منه', async () => {
+  const P = await import('../js/providers.js');
+  const rec = await P.addCustomProvider({
+    label: 'سيرفري المحلي', emoji: '🏠', kind: 'openai',
+    baseUrl: 'http://192.168.1.9:1234/v1/', apiKey: 'sk-mine', models: ['my-model-1'],
+  });
+  assert.equal(rec.baseUrl, 'http://192.168.1.9:1234/v1', 'تم تنظيف الرابط');
+  assert.ok(P.allProviders().some((p) => p.id === rec.id), 'ظاهر في كل المزوّدين');
+  assert.equal(P.getProvider(rec.id).label, 'سيرفري المحلي');
+
+  const conn = await P.getConnection(rec.id);
+  assert.equal(conn.apiKey, 'sk-mine');
+  assert.equal(conn.baseUrl, 'http://192.168.1.9:1234/v1');
+
+  const avail = await P.availableProviders();
+  assert.ok(avail.some((p) => p.id === rec.id), 'متاح للاستخدام في المحادثة');
+
+  // تحقق: يجلب الموديلات ثم يجرّب ردًّا
+  const calls = [];
+  globalThis.fetch = async (url, opts) => {
+    calls.push(String(url));
+    if (String(url).endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'my-model-1' }, { id: 'my-model-2' }] }), { status: 200 });
+    return sseResponse([{ choices: [{ delta: { content: 'تمام' }, finish_reason: 'stop' }] }]);
+  };
+  const r = await P.verifyProviderConfig(rec);
+  assert.equal(r.models.length, 2);
+  assert.equal(r.reply, 'تمام');
+  assert.equal(r.model, 'my-model-1');
+  assert.ok(calls.some((u) => u.includes('/chat/completions')), 'جرّب ردًّا فعليًا');
+
+  await P.removeCustomProvider(rec.id);
+  assert.ok(!P.allProviders().some((p) => p.id === rec.id), 'تم الحذف');
+});

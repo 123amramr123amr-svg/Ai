@@ -61,6 +61,16 @@ function inline(text) {
   return s;
 }
 
+/* فك تشفير HTML للحصول على الكود الأصلي */
+export function unescapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
 function tableToHtml(rows) {
   const cells = (line) => line.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
   const head = cells(rows[0]);
@@ -77,7 +87,8 @@ export function renderMarkdown(md, { onCodeBlock } = {}) {
 
   text = text.replace(/```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)(?:```|$)/g, (_, lang, code) => {
     const idx = blocks.length;
-    blocks.push({ lang: (lang || '').toLowerCase(), code });
+    // code = مُشفَّر للعرض فقط، raw = الكود الحقيقي للتشغيل والنسخ
+    blocks.push({ lang: (lang || '').toLowerCase(), code, raw: unescapeHtml(code) });
     return `\u0000BLOCK${idx}\u0000`;
   });
 

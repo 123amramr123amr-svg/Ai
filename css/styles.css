@@ -295,3 +295,10 @@ html[dir=rtl] .nav-item.active{box-shadow:inset -3px 0 0 var(--acc)}
 
 
 
+
+/* ------------------ معاينة حيّة داخل الرد ------------------ */
+.code-live{margin-top:8px}
+.code-live .live-bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.code-live iframe{width:100%;height:min(46vh,380px);border:1px solid var(--line-2);border-radius:12px;background:#fff;display:block}
+.code-live .pv-log{max-height:104px;margin-top:6px}
+.live-empty{border:1px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;color:var(--txt-faint);font-size:13px}
