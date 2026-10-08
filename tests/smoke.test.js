@@ -293,3 +293,46 @@ test('smoke: صفحة الوكلاء وصفحة «عن التطبيق» تعمل
   assert.ok(about.includes('المكتبة'), 'صفحة «عن التطبيق» تعمل');
   assert.ok(about.includes('Python'), 'تذكر اللغات المدعومة');
 });
+
+test('smoke: قفل التطبيق برمز الحماية', async () => {
+  const lock = await import('../js/lock.js');
+  assert.equal(await lock.isLockEnabled(), false, 'القفل موقوف في البداية');
+
+  const h1 = await lock.hashPin('1234');
+  const h2 = await lock.hashPin('1234');
+  const h3 = await lock.hashPin('9999');
+  assert.equal(h1, h2, 'نفس الرمز = نفس التجزئة');
+  assert.notEqual(h1, h3, 'رمز مختلف = تجزئة مختلفة');
+  assert.ok(!h1.includes('1234'), 'الرمز غير مخزّن كنص صريح');
+
+  await lock.setPin('4321');
+  assert.equal(await lock.isLockEnabled(), true);
+  assert.equal(await lock.verifyPin('4321'), true);
+  assert.equal(await lock.verifyPin('1111'), false);
+
+  await lock.clearPin();
+  assert.equal(await lock.isLockEnabled(), false);
+  assert.equal(await lock.verifyPin('أي حاجة'), true, 'بعد إزالة القفل يفتح دائمًا');
+});
+
+test('smoke: شاشة الاستخدام والمقارنة تعملان', async () => {
+  const { Usage } = await import('../js/db.js');
+  await Usage.add({ providerId: 'openai', model: 'gpt-4o-mini', tokensIn: 1200, tokensOut: 400, cost: 0.00042, ms: 900, ok: true });
+
+  app.goto('usage');
+  await new Promise((r) => setTimeout(r, 150));
+  const usageHtml = document.querySelector('#view-usage').innerHTML;
+  assert.ok(usageHtml.includes('الاستخدام والتكلفة'), 'صفحة الاستخدام ظهرت');
+  assert.ok(usageHtml.includes('gpt-4o-mini'), 'الموديل ظاهر في التفصيل');
+  assert.ok(document.querySelector('#usageExport'), 'زر تصدير CSV موجود');
+  assert.ok(document.querySelectorAll('.bars .bar').length === 7, 'رسم آخر 7 أيام');
+
+  app.goto('compare');
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(document.querySelector('#cmpProv'), 'اختيار المزوّد موجود');
+  assert.ok(document.querySelector('#cmpRun'), 'زر المقارنة موجود');
+  document.querySelector('#cmpModel').value = 'gpt-4o-mini';
+  document.querySelector('#cmpAdd').click();
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(document.querySelector('#cmpPicks .pick'), 'تمت إضافة نموذج للمقارنة');
+});

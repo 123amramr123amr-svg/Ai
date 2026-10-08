@@ -1,16 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="مساعدي">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="مِشْكاة">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#5b8cff"/>
-      <stop offset="55%" stop-color="#8a5bff"/>
-      <stop offset="100%" stop-color="#22d3a6"/>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffd76a"/>
+      <stop offset="55%" stop-color="#f0b429"/>
+      <stop offset="100%" stop-color="#e0632f"/>
     </linearGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fffdf5"/>
+      <stop offset="45%" stop-color="#ffe9a8"/>
+      <stop offset="100%" stop-color="#f0b429" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="46%" r="52%">
+      <stop offset="0%" stop-color="#f0b429" stop-opacity=".55"/>
+      <stop offset="100%" stop-color="#f0b429" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect width="512" height="512" rx="112" fill="#0b1020"/>
-  <rect x="36" y="36" width="440" height="440" rx="92" fill="url(#g)" opacity="0.16"/>
-  <path d="M256 96c-88 0-160 60-160 134 0 44 26 83 66 108v78l72-44c7 1 15 1 22 1 88 0 160-60 160-134S344 96 256 96z" fill="url(#g)"/>
-  <circle cx="188" cy="228" r="22" fill="#0b1020"/>
-  <circle cx="256" cy="228" r="22" fill="#0b1020"/>
-  <circle cx="324" cy="228" r="22" fill="#0b1020"/>
-  <path d="M150 330c30 34 68 52 106 52s76-18 106-52" stroke="#0b1020" stroke-width="18" fill="none" stroke-linecap="round" opacity="0.35"/>
+  <rect width="512" height="512" rx="116" fill="#0b0a16"/>
+  <circle cx="256" cy="236" r="188" fill="url(#halo)"/>
+  <path d="M256 74c-78 0-141 60-141 134v212h282V208c0-74-63-134-141-134z" fill="url(#gold)" opacity=".97"/>
+  <path d="M256 104c-66 0-119 51-119 113v175h238V217c0-62-53-113-119-113z" fill="#0b0a16" opacity=".92"/>
+  <circle cx="256" cy="248" r="92" fill="url(#core)"/>
+  <circle cx="256" cy="248" r="34" fill="#fffdf5"/>
+  <g stroke="url(#gold)" stroke-width="15" stroke-linecap="round" opacity=".95">
+    <path d="M256 128v46"/><path d="M256 322v46"/>
+    <path d="M160 248h40"/><path d="M312 248h40"/>
+    <path d="M188 180l30 30"/><path d="M324 180l-30 30"/>
+    <path d="M188 316l30-30"/><path d="M324 316l-30-30"/>
+  </g>
 </svg>

@@ -1,7 +1,7 @@
 {
-  "name": "مساعدي — AI متعدد النماذج",
-  "short_name": "مساعدي",
-  "description": "إضافة مفاتيح API للتحدث مع نماذج الذكاء الاصطناعي عبر الصوت والصور والفيديو والملفات، مع سجل محلي وصفحة معاينة للأكواد.",
+  "name": "مِشْكاة — مساعدك الذكي بمفاتيحك الخاصة",
+  "short_name": "مِشْكاة",
+  "description": "تطبيق ذكاء اصطناعي بمفاتيحك: محادثات بالصوت والصورة والملفات، وكلاء بأدوات، معاينة أكواد بلغات متعددة، تتبّع التكلفة، ومقارنة النماذج.",
   "lang": "ar",
   "dir": "rtl",
   "start_url": "./index.html",
@@ -11,9 +11,29 @@
   "background_color": "#0b1020",
   "theme_color": "#0b1020",
   "icons": [
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

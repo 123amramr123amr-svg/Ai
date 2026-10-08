@@ -157,3 +157,46 @@ test('tools: التاريخ والوقت', async () => {
 test('tools: أداة غير معروفة', async () => {
   assert.match(await executeTool('لا_توجد', {}), /غير معروفة/);
 });
+
+test('usage: حساب التكلفة والرموز', async () => {
+  const u = await import('../js/usage.js');
+  assert.equal(u.priceOf('gpt-4o-mini').known, true);
+  assert.equal(u.priceOf('gpt-4o-mini').in, 0.15);
+  assert.equal(u.priceOf('some-unknown-model').known, false);
+  assert.ok(Math.abs(u.costOf('gpt-4o', 1e6, 1e6) - 12.5) < 1e-9, 'gpt-4o: 2.5 + 10');
+  assert.ok(Math.abs(u.costOf('gpt-4o-mini', 1e6, 0) - 0.15) < 1e-9);
+  assert.equal(u.money(0), '$0');
+  assert.match(u.money(0.0021), /^\$0\.00/);
+  assert.equal(u.tokensFmt(1500), '1.5K');
+  assert.equal(u.tokensFmt(2500000), '2.50M');
+});
+
+test('usage: توحيد شكل الإحصاءات من كل مزوّد', async () => {
+  const u = await import('../js/usage.js');
+  assert.deepEqual(u.normalizeUsage({ prompt_tokens: 10, completion_tokens: 20 }), { tokensIn: 10, tokensOut: 20 });
+  assert.deepEqual(u.normalizeUsage({ input_tokens: 5, output_tokens: 7 }), { tokensIn: 5, tokensOut: 7 });
+  assert.deepEqual(u.normalizeUsage({ promptTokenCount: 3, candidatesTokenCount: 4 }), { tokensIn: 3, tokensOut: 4 });
+  assert.deepEqual(u.normalizeUsage(null), { tokensIn: 0, tokensOut: 0 });
+});
+
+test('usage: التجميع والرسم البياني', async () => {
+  const u = await import('../js/usage.js');
+  const now = Date.now();
+  const rows = [
+    { ts: now, model: 'gpt-4o-mini', providerId: 'openai', tokensIn: 1000, tokensOut: 500, cost: 0.00045 },
+    { ts: now, model: 'gpt-4o-mini', providerId: 'openai', tokensIn: 2000, tokensOut: 1000, cost: 0.0009 },
+    { ts: now, model: 'claude-sonnet-4', providerId: 'anthropic', tokensIn: 500, tokensOut: 200, cost: 0.0045 },
+  ];
+  const s = u.summarize(rows);
+  assert.equal(s.requests, 3);
+  assert.equal(s.totalTokens, 5200);
+  assert.equal(s.tokensIn, 3500);
+  assert.equal(s.tokensOut, 1700);
+  assert.equal(s.byModel.size, 2);
+  assert.equal(s.byModel.get('gpt-4o-mini').requests, 2);
+  assert.equal(s.byProvider.get('openai').requests, 2);
+  assert.ok(Math.abs(s.cost - 0.00585) < 1e-9);
+  const days = u.lastDays(s.byDay, 7);
+  assert.equal(days.length, 7);
+  assert.equal(days[6].tokens, 5200, 'اليوم الأخير = اليوم');
+});

@@ -1,6 +1,6 @@
 /* sw.js — Service Worker: تخزين واجهة التطبيق للعمل بدون إنترنت */
 
-const CACHE = 'mosaaidi-v1';
+const CACHE = 'mishkat-v1';
 const SHELL = [
   './',
   './index.html',
@@ -13,6 +13,9 @@ const SHELL = [
   './js/markdown.js',
   './js/preview.js',
   './js/tools.js',
+  './js/runtimes.js',
+  './js/usage.js',
+  './js/lock.js',
   './js/util.js',
   './icons/icon.svg',
 ];

@@ -1,7 +1,7 @@
 /* db.js — تخزين محلي على الجهاز عبر IndexedDB (بدون أي سيرفر) */
 
 const DB_NAME = 'mosaaidi-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let _db = null;
 
@@ -22,6 +22,10 @@ export function openDb() {
         s.createIndex('conversationId', 'conversationId');
       }
       if (!db.objectStoreNames.contains('assets')) db.createObjectStore('assets', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('usage')) {
+        const s = db.createObjectStore('usage', { keyPath: 'id' });
+        s.createIndex('ts', 'ts');
+      }
       if (!db.objectStoreNames.contains('artifacts')) {
         const s = db.createObjectStore('artifacts', { keyPath: 'id' });
         s.createIndex('createdAt', 'createdAt');
@@ -165,9 +169,24 @@ export const Agents = {
   async remove(id) { await Agents.save((await Agents.list()).filter((x) => x.id !== id)); },
 };
 
+/* ---------- سجل الاستخدام والتكلفة ---------- */
+export const Usage = {
+  async add(rec) {
+    const row = { id: 'u_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), ts: Date.now(), ...rec };
+    await tx('usage', 'readwrite', (s) => s.put(row));
+    return row;
+  },
+  async all() { return (await tx('usage', 'readonly', (s) => wrap(s.getAll()))) || []; },
+  async since(ts) {
+    const rows = await tx('usage', 'readonly', (s) => wrap(s.index('ts').getAll(IDBKeyRange.lowerBound(ts))));
+    return rows || [];
+  },
+  clear() { return tx('usage', 'readwrite', (s) => s.clear()); },
+};
+
 /* ---------- إدارة كل البيانات ---------- */
 export async function clearAll() {
-  await Promise.all([Conversations.clear(), Messages.clear(), Assets.clear(), Artifacts.clear()]);
+  await Promise.all([Conversations.clear(), Messages.clear(), Assets.clear(), Artifacts.clear(), Usage.clear()]);
 }
 
 export async function exportAll() {

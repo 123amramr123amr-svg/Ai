@@ -1,13 +1,15 @@
 /* app.js — واجهة التطبيق والمنطق الرئيسي */
 
 import * as DB from './db.js';
-import { Settings, Conversations, Messages, Assets, Artifacts, Agents, storageEstimate, askPersistent } from './db.js';
+import { Settings, Conversations, Messages, Assets, Artifacts, Agents, Usage, storageEstimate, askPersistent } from './db.js';
 import { PROVIDERS, allProviders, getProvider, getConnection, getKeys, listModels, testConnection, availableProviders, chat, transcribe, getCustomProviders, loadCustomProviders, addCustomProvider, updateCustomProvider, removeCustomProvider, verifyProviderConfig } from './providers.js';
 import { fileToAttachment, attachmentDataUrl, attachmentBlob, VoiceRecorder, speak, stopSpeaking, ttsSupported } from './media.js';
 import { renderMarkdown, extractArtifacts, langLabel } from './markdown.js';
 import { TOOL_DEFS, TOOL_LIST, runAgentLoop } from './tools.js';
 import { runInFrame, stopFrame, attachRunner, artifactToHtmlFile, artifactFileName, buildDoc } from './preview.js';
 import { runtimeOf, runtimeLabel, needsOnline, SUPPORTED_LANGS } from './runtimes.js';
+import { record as recordUsage, summarize as summarizeUsage, lastDays, money, tokensFmt, priceOf } from './usage.js';
+import { LockScreen, isLockEnabled, setPin, clearPin, hashPin } from './lock.js';
 import { uid, esc, fmtTime, bytes, clampText, download, copyText, debounce, nativeApp } from './util.js';
 
 /* ============================ الحالة ============================ */
@@ -27,6 +29,9 @@ export const state = {
   libQuery: '',
   libFilter: 'all',
   msgIndex: null,
+  comparePicks: null,
+  lock: null,
+  hiddenAt: 0,
   settings: {},
   toolSteps: [],
 };
@@ -87,13 +92,57 @@ export function goto(view, opts = {}) {
   document.body.classList.remove('drawer-open');
   if (view === 'agents') renderAgents();
   if (view === 'settings') renderSettings();
+  if (view === 'usage') renderUsage();
+  if (view === 'compare') renderCompare();
   if (view === 'about') renderAbout();
+  syncTabbar(view);
   if (view === 'chats') renderChatsHome();
   if (view === 'chat') scrollMessages();
 }
 
 function openDrawer() { document.body.classList.add('drawer-open'); const sc = document.getElementById('scrim'); if (sc) sc.hidden = false; }
 function closeDrawer() { document.body.classList.remove('drawer-open'); const sc = document.getElementById('scrim'); if (sc) sc.hidden = true; }
+
+function syncTabbar(view) {
+  const v = view === 'chat' ? 'chat' : view;
+  $$('#tabbar .tab').forEach((b) => b.classList.toggle('active', b.dataset.goto === v));
+}
+
+/* ============================ شرائح الأوامر السريعة ============================ */
+const NL = String.fromCharCode(10);
+const FENCE = String.fromCharCode(96, 96, 96);
+
+const QUICK_ACTIONS = [
+  { icon: '🌐', label: 'ترجم', text: 'ترجم النص التالي إلى العربية ترجمة دقيقة وطبيعية مع الحفاظ على التنسيق:' + NL + NL },
+  { icon: '📝', label: 'لخّص', text: 'لخّص النص التالي في نقاط مختصرة وواضحة:' + NL + NL },
+  { icon: '✍️', label: 'حسّن كتابتي', text: 'حسّن صياغة النص التالي بالعربية الفصحى المبسطة مع الحفاظ على المعنى:' + NL + NL },
+  { icon: '🧑‍💻', label: 'اشرح كود', text: 'اشرح الكود التالي سطرًا سطرًا، وبيّن وظيفته والأخطاء إن وُجدت:' + NL + NL + FENCE + NL + NL + FENCE },
+  { icon: '🐞', label: 'صلّح خطأ', text: 'هذا الكود به خطأ. اكتشفه وأعطني الكود المصحّح مع شرح السبب:' + NL + NL + FENCE + NL + NL + FENCE },
+  { icon: '💡', label: 'أفكار', text: 'أعطني 10 أفكار إبداعية ومختلفة حول: ' },
+  { icon: '📊', label: 'جدول', text: 'اعرض المعلومات التالية في جدول Markdown منظّم: ' },
+  { icon: '❓', label: 'اختبرني', text: 'اعمل لي 5 أسئلة اختيار من متعدد لاختبار فهمي في: ' },
+  { icon: '🗣️', label: 'بالعامية', text: 'أعد كتابة التالي بالعامية المصرية بطريقة ودودة:' + NL + NL },
+  { icon: '🔍', label: 'ابحث', text: 'ابحث في الإنترنت عن أحدث المعلومات حول: ' },
+];
+
+function renderQuickChips() {
+  const box = $('#quickChips');
+  if (!box) return;
+  box.innerHTML = QUICK_ACTIONS.map((a, i) => `<button class="qchip" data-qa="${i}">${a.icon} ${a.label}</button>`).join('');
+  box.querySelectorAll('[data-qa]').forEach((b) => {
+    b.onclick = () => {
+      const a = QUICK_ACTIONS[Number(b.dataset.qa)];
+      const input = $('#input');
+      input.value = (a.text || '') + input.value;
+      input.focus();
+      autoResize(input);
+      const pos = (a.text || '').indexOf(FENCE + NL + NL + FENCE) >= 0
+        ? (a.text || '').length - (FENCE + NL + NL + FENCE).length + FENCE.length + NL.length
+        : input.value.length;
+      try { input.setSelectionRange(pos, pos); } catch {}
+    };
+  });
+}
 
 /* ============================ الإعدادات الافتراضية ============================ */
 const DEFAULTS = {
@@ -758,7 +807,7 @@ function startStreamBubble() {
 async function runTurn({ providerId, model, agent }) {
   const startedAt = Date.now();
   setStreamingUI(true);
-  document.title = '⏳ جارٍ الرد… — مساعدي';
+  document.title = '⏳ جارٍ الرد… — مِشْكاة';
   state.controller = new AbortController();
   state.toolSteps = [];
   renderToolLog();
@@ -872,11 +921,19 @@ async function runTurn({ providerId, model, agent }) {
   scrollMessages();
   await touchConversationMeta();
 
+  // تسجيل الاستخدام والتكلفة
+  try {
+    await recordUsage({
+      providerId, model, usage: result?.usage, conversationId: state.current.id,
+      ms: Date.now() - startedAt, ok: !failure, kind: agent ? 'agent' : 'chat',
+    });
+  } catch (e) { console.warn('usage', e); }
+
   // إشعار لو المستخدم خرج من التطبيق أو الرد أخد وقتًا طويلًا
-  document.title = 'مساعدي — AI متعدد النماذج';
+  document.title = 'مِشْكاة — مساعدك الذكي';
   const took = Date.now() - startedAt;
   if (state.settings.notifyOnFinish !== false && (document.hidden || took > 20000) && finalText) {
-    notify('✅ تم الرد', clampText(finalText, 110));
+    notify('✅ مِشْكاة — تم الرد', clampText(finalText, 110));
   }
 
   // كل كود في الرد يُحفظ تلقائيًا في السجل
@@ -1175,6 +1232,210 @@ async function touchConversationMeta() {
   invalidateMsgIndex();
 }
 
+/* ============================ الاستخدام والتكلفة ============================ */
+async function renderUsage() {
+  const view = $('#view-usage');
+  const rows = await Usage.all();
+  const sum = summarizeUsage(rows);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRows = rows.filter((r) => new Date(r.ts).toISOString().slice(0, 10) === today);
+  const todaySum = summarizeUsage(todayRows);
+  const days = lastDays(sum.byDay, 7);
+  const maxTok = Math.max(1, ...days.map((d) => d.tokens));
+  const models = [...sum.byModel.values()].sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
+
+  view.innerHTML = `
+    <div class="section">
+      <h2>💰 الاستخدام والتكلفة</h2>
+      <p class="sub">كل طلب تُحسب رموزه وتكلفته التقريبية وتُخزَّن على جهازك فقط. الأسعار تقديرية حسب أسعار المزوّدين المعلنة لكل مليون رمز.</p>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">طلبات اليوم</div><div class="stat-value">${todaySum.requests}</div><div class="stat-sub">${tokensFmt(todaySum.totalTokens)} رمز</div></div>
+        <div class="stat"><div class="stat-label">تكلفة اليوم</div><div class="stat-value">${money(todaySum.cost)}</div><div class="stat-sub">تقديرية</div></div>
+        <div class="stat"><div class="stat-label">إجمالي الطلبات</div><div class="stat-value">${sum.requests}</div><div class="stat-sub">من كل الموديلات</div></div>
+        <div class="stat"><div class="stat-label">إجمالي التكلفة</div><div class="stat-value">${money(sum.cost)}</div><div class="stat-sub">${tokensFmt(sum.totalTokens)} رمز</div></div>
+      </div>
+      <h3 style="margin:16px 0 4px;font-size:14px">آخر 7 أيام (الرموز)</h3>
+      <div class="bars">
+        ${days.map((d) => `<div class="bar" style="height:${Math.max(3, Math.round((d.tokens / maxTok) * 100))}%" title="${d.day}: ${tokensFmt(d.tokens)} رمز — ${money(d.cost)}"><span>${d.label}</span></div>`).join('')}
+      </div>
+      <div style="height:22px"></div>
+    </div>
+
+    <div class="section">
+      <h2>📊 حسب الموديل</h2>
+      ${models.length ? models.map((m) => `
+        <div class="usage-row">
+          <span class="u-model">${esc(m.model)}</span>
+          <span class="badge">${m.requests} طلب</span>
+          <span class="badge">${tokensFmt(m.tokens)} رمز</span>
+          <b style="color:var(--acc)">${money(m.cost)}</b>
+        </div>`).join('') : '<div class="empty">لا يوجد سجل استخدام بعد — ابدأ محادثة وسيُحسب كل شيء تلقائيًا.</div>'}
+    </div>
+
+    <div class="section">
+      <h2>🧩 حسب المزوّد</h2>
+      ${[...sum.byProvider.values()].sort((a, b) => b.cost - a.cost).map((p) => {
+        const info = getProvider(p.providerId);
+        return `<div class="usage-row"><span class="u-model">${info ? (info.emoji + ' ' + esc(info.label)) : esc(p.providerId)}</span><span class="badge">${p.requests} طلب</span><b style="color:var(--acc)">${money(p.cost)}</b></div>`;
+      }).join('') || '<div class="empty">لا توجد بيانات</div>'}
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="usageExport">⬇️ تصدير السجل (CSV)</button>
+        <button class="btn danger" id="usageClear">🗑 تصفير سجل الاستخدام</button>
+      </div>
+    </div>
+  `;
+
+  $('#usageExport').onclick = () => {
+    const head = 'date,provider,model,tokens_in,tokens_out,cost_usd,ms';
+    const body = rows.map((r) => [new Date(r.ts).toISOString(), r.providerId, r.model, r.tokensIn || 0, r.tokensOut || 0, (r.cost || 0).toFixed(6), r.ms || 0].join(',')).join('\n');
+    download('mishkat-usage.csv', head + body, 'text/csv;charset=utf-8');
+    toast('تم تصدير سجل الاستخدام');
+  };
+  $('#usageClear').onclick = async () => {
+    await Usage.clear();
+    renderUsage();
+    toast('تم تصفير السجل');
+  };
+}
+
+/* ============================ مقارنة النماذج ============================ */
+async function renderCompare() {
+  const view = $('#view-compare');
+  const avail = await availableProviders();
+  const list = avail.length ? avail : allProviders();
+  if (!state.comparePicks) state.comparePicks = state.settings.comparePicks || [];
+
+  view.innerHTML = `
+    <div class="section">
+      <h2>⚖️ مقارنة النماذج</h2>
+      <p class="sub">اسأل نفس السؤال لعدة نماذج <b>في نفس الوقت</b> وشوف الفرق جنب بعض: السرعة، التكلفة، وجودة الرد. اختار حتى 4 نماذج.</p>
+      <div class="row">
+        <div class="field" style="max-width:280px"><label>المزوّد</label><select id="cmpProv">${list.map((p) => `<option value="${p.id}">${p.emoji} ${esc(p.label)}</option>`).join('')}</select></div>
+        <div class="field"><label>الموديل</label><input id="cmpModel" dir="ltr" placeholder="gpt-4o-mini" /><div class="hint" id="cmpHint"></div></div>
+        <button class="btn" id="cmpAdd" style="align-self:flex-end;margin-bottom:13px">＋ أضف للمقارنة</button>
+      </div>
+      <div class="picker" id="cmpPicks"></div>
+      <div class="field" style="margin-top:12px"><label>السؤال</label><textarea id="cmpPrompt" rows="3" placeholder="اكتب سؤالك هنا…"></textarea></div>
+      <div class="row">
+        <button class="btn primary" id="cmpRun">⚖️ قارن الآن</button>
+        <button class="btn" id="cmpClear">🧹 تفريغ النتائج</button>
+      </div>
+    </div>
+    <div class="cmp-grid" id="cmpGrid"></div>
+  `;
+
+  const provSel = $('#cmpProv');
+  const modelIn = $('#cmpModel');
+  const hint = $('#cmpHint');
+  const paintModels = () => {
+    const p = getProvider(provSel.value);
+    modelIn.value = p?.models?.[0] || '';
+    hint.textContent = p ? (p.custom ? 'نموذجك الخاص' : (p.models || []).slice(0, 3).join(' • ')) : '';
+  };
+  provSel.onchange = paintModels;
+  paintModels();
+
+  const paintPicks = () => {
+    const box = $('#cmpPicks');
+    if (!state.comparePicks.length) { box.innerHTML = '<span class="hint">لم تختر نماذج بعد — أضف نموذجين على الأقل.</span>'; return; }
+    box.innerHTML = state.comparePicks.map((p, i) => {
+      const info = getProvider(p.providerId);
+      return `<span class="pick on">${info?.emoji || '🧩'} ${esc(p.model)} <button class="btn sm danger" data-rmpick="${i}" style="padding:1px 6px">✕</button></span>`;
+    }).join('');
+    box.querySelectorAll('[data-rmpick]').forEach((b) => {
+      b.onclick = async () => {
+        state.comparePicks.splice(Number(b.dataset.rmpick), 1);
+        await setSetting('comparePicks', state.comparePicks);
+        paintPicks();
+      };
+    });
+  };
+  paintPicks();
+
+  $('#cmpAdd').onclick = async () => {
+    const providerId = provSel.value;
+    const model = modelIn.value.trim();
+    if (!model) return toast('اكتب اسم الموديل');
+    if (state.comparePicks.length >= 4) return toast('الحد الأقصى 4 نماذج');
+    if (state.comparePicks.some((p) => p.providerId === providerId && p.model === model)) return toast('مضاف بالفعل');
+    state.comparePicks.push({ providerId, model });
+    await setSetting('comparePicks', state.comparePicks);
+    paintPicks();
+  };
+
+  $('#cmpClear').onclick = () => { $('#cmpGrid').innerHTML = ''; };
+  $('#cmpRun').onclick = () => runCompare();
+}
+
+async function runCompare() {
+  const prompt = $('#cmpPrompt').value.trim();
+  const picks = state.comparePicks || [];
+  if (!prompt) return toast('اكتب السؤال أولًا');
+  if (picks.length < 2) return toast('اختر نموذجين على الأقل للمقارنة');
+
+  const grid = $('#cmpGrid');
+  grid.innerHTML = picks.map((p, i) => {
+    const info = getProvider(p.providerId);
+    return `<div class="cmp-card" id="cmpc${i}">
+      <div class="cmp-head"><span>${info?.emoji || '🧩'}</span><b dir="ltr">${esc(p.model)}</b><span class="badge" data-state>…</span></div>
+      <div class="cmp-body"><span class="typing"><i></i><i></i><i></i></span></div>
+      <div class="cmp-foot" data-foot></div>
+    </div>`;
+  }).join('');
+
+  const started = picks.map(() => Date.now());
+  let firstDone = -1;
+
+  await Promise.all(picks.map(async (p, i) => {
+    const card = document.getElementById('cmpc' + i);
+    const body = card.querySelector('.cmp-body');
+    const stateBadge = card.querySelector('[data-state]');
+    const foot = card.querySelector('[data-foot]');
+    let acc = '';
+    try {
+      const res = await chat({
+        providerId: p.providerId, model: p.model,
+        messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+        system: state.settings.systemPrompt,
+        maxTokens: state.settings.maxTokens,
+        temperature: state.settings.temperature,
+        onDelta: (_piece, full) => { acc = full; body.innerHTML = renderMarkdown(full); },
+      });
+      acc = (res.text || acc || '').trim() || '(رد فارغ)';
+      body.innerHTML = renderMarkdown(acc);
+      const ms = Date.now() - started[i];
+      if (firstDone < 0) { firstDone = i; card.classList.add('win'); }
+      stateBadge.className = 'badge ok';
+      stateBadge.textContent = (ms / 1000).toFixed(1) + ' ث';
+      const u = normalizeUsageLocal(res.usage);
+      const cost = costOfLocal(p.model, u.tokensIn, u.tokensOut);
+      foot.innerHTML = `<span class="badge">${tokensFmt(u.tokensIn + u.tokensOut)} رمز</span><span class="badge">${money(cost)}</span>
+        <button class="btn sm" data-copy-cmp="${i}">📋 نسخ</button>
+        <button class="btn sm" data-use-cmp="${i}">💬 تابع في محادثة</button>`;
+      foot.querySelector('[data-copy-cmp]').onclick = async () => { await copyText(acc); toast('تم النسخ'); };
+      foot.querySelector('[data-use-cmp]').onclick = async () => {
+        const conv = await newChat({ providerId: p.providerId, model: p.model, title: clampText(prompt, 40) });
+        await Messages.add({ conversationId: conv.id, role: 'user', content: [{ type: 'text', text: prompt }] });
+        state.messages = await Messages.byConversation(conv.id);
+        renderMessages();
+        await runTurn({ providerId: p.providerId, model: p.model, agent: null });
+      };
+      await recordUsage({ providerId: p.providerId, model: p.model, usage: res.usage, conversationId: '', ms, ok: true, kind: 'compare' });
+    } catch (e) {
+      body.innerHTML = `<div class="badge no">❌ فشل</div><pre style="white-space:pre-wrap;direction:ltr;text-align:left;font-size:12px">${esc(e.message || String(e))}</pre>`;
+      stateBadge.className = 'badge no';
+      stateBadge.textContent = 'خطأ';
+    }
+  }));
+  toast('خلصت المقارنة ✅');
+}
+
+const normalizeUsageLocal = (u) => ({
+  tokensIn: (u && (u.prompt_tokens ?? u.input_tokens ?? u.promptTokenCount)) || 0,
+  tokensOut: (u && (u.completion_tokens ?? u.output_tokens ?? u.candidatesTokenCount)) || 0,
+});
+const costOfLocal = (model, i, o) => { const p = priceOf(model); return ((i || 0) / 1e6) * p.in + ((o || 0) / 1e6) * p.out; };
+
 /* ============================ الإعدادات ============================ */
 async function renderSettings() {
   const view = $('#view-settings');
@@ -1233,6 +1494,16 @@ async function renderSettings() {
       <p class="sub">معلومات يحفظها الوكيل عنك عبر أداة «تذكّر».</p>
       <div id="memList">${memory.length ? memory.map((m, i) => `<div class="kv"><span>${esc(m)}</span><button class="btn sm danger" data-mem-del="${i}">حذف</button></div>`).join('') : '<div class="empty">لا توجد معلومات محفوظة</div>'}</div>
       ${memory.length ? '<button class="btn danger" id="clearMem" style="margin-top:10px">مسح كل الذاكرة</button>' : ''}
+    </div>
+
+    <div class="section">
+      <h2>🔒 قفل التطبيق</h2>
+      <p class="sub">مفاتيح API ومحادثاتك محفوظة على الجهاز — اقفل التطبيق برمز من 4 أرقام يتطلب عند كل فتح.</p>
+      <div class="kv"><span>حالة القفل</span><b>${state.settings.lockHash ? '🔒 مفعّل' : '🔓 موقوف'}</b></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" id="lockSet">${state.settings.lockHash ? 'تغيير الرمز' : 'تعيين رمز حماية'}</button>
+        ${state.settings.lockHash ? '<button class="btn danger" id="lockRemove">إزالة القفل</button>' : ''}
+      </div>
     </div>
 
     <div class="section">
@@ -1316,6 +1587,35 @@ async function renderSettings() {
   });
   const cm = $('#clearMem');
   if (cm) cm.onclick = async () => { await setSetting('memory', []); renderSettings(); toast('تم مسح الذاكرة'); };
+
+  $('#lockSet').onclick = async () => {
+    openModal({
+      title: 'رمز الحماية',
+      body: `<div class="field"><label>رمز من 4 أرقام</label><input id="pinA" type="password" inputmode="numeric" maxlength="4" dir="ltr" /></div>
+             <div class="field"><label>تأكيد الرمز</label><input id="pinB" type="password" inputmode="numeric" maxlength="4" dir="ltr" /></div>
+             <div class="hint">⚠️ لو نسيت الرمز مش هينفع استرجاعه — لازم تمسح بيانات التطبيق.</div>`,
+      actions: [
+        { label: 'إلغاء', onClick: closeModal },
+        { label: 'حفظ', className: 'primary', onClick: async () => {
+          const a = $('#pinA').value.trim(), b = $('#pinB').value.trim();
+          if (!/^[0-9]{4}$/.test(a)) return toast('الرمز لازم يكون 4 أرقام');
+          if (a !== b) return toast('الرمزين غير متطابقين');
+          await setPin(a);
+          state.settings = { ...state.settings, ...(await Settings.all()) };
+          closeModal(); renderSettings();
+          toast('تم تعيين رمز الحماية 🔒');
+        } },
+      ],
+    });
+    setTimeout(() => $('#pinA')?.focus(), 60);
+  };
+  const lr = $('#lockRemove');
+  if (lr) lr.onclick = async () => {
+    await clearPin();
+    state.settings = { ...state.settings, ...(await Settings.all()) };
+    renderSettings();
+    toast('تم إزالة القفل');
+  };
 
   $('#exportBtn2').onclick = doExport;
   $('#importBtn').onclick = () => $('#importFile').click();
@@ -1477,7 +1777,7 @@ async function saveKeys(silent = false) {
 /* ============================ تصدير/استيراد/مسح ============================ */
 async function doExport() {
   const data = await DB.exportAll();
-  download(`mosaaidi-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), 'application/json');
+  download(`mishkat-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), 'application/json');
   toast('تم إنشاء النسخة الاحتياطية (بدون المفاتيح)');
 }
 
@@ -1517,8 +1817,8 @@ function confirmWipe() {
 function renderAbout() {
   $('#view-about').innerHTML = `
     <div class="section">
-      <h2>ℹ️ مساعدي — تطبيق ذكاء اصطناعي بمفاتيحك الخاصة</h2>
-      <p class="sub">تطبيق ويب (PWA) يعمل على الهاتف والتابلت والكمبيوتر، بدون سيرفر وسيط. أنت تضع مفاتيح API المدفوعة الخاصة بك وتتحدث مع النماذج مباشرة.</p>
+      <h2>مِشْكاة — نور لعقلك 💡</h2>
+      <p class="sub">تطبيق يعمل على الهاتف والتابلت والكمبيوتر، بدون سيرفر وسيط. أنت تضع مفاتيح API المدفوعة الخاصة بك وتتحدث مع النماذج مباشرة — نصًا وصوتًا وصورًا وملفات، مع وكلاء ومعاينة أكواد.</p>
       <div class="grid-cards">
         <div class="card"><h3>🔑 مفاتيحك</h3><p>OpenAI، Claude، Gemini، OpenRouter، Groq، DeepSeek، Mistral، xAI، Together، Ollama المحلي، وأي سيرفر متوافق مع OpenAI.</p></div>
         <div class="card"><h3>🎤 متعدد الوسائط</h3><p>أرسل نصًا، تسجيل صوتي، صورًا، فيديو، ملفات و PDF. واستقبل صورًا وردودًا صوتية.</p></div>
@@ -1526,6 +1826,10 @@ function renderAbout() {
         <div class="card"><h3>🔔 يشتغل في الخلفية</h3><p>لو خرجت من التطبيق يكمل الرد ويبعتلك إشعار لما يخلص (على أندرويد إشعار حقيقي).</p></div>
         <div class="card"><h3>🧩 نماذجك الخاصة</h3><p>أضف أي نموذج بمفتاحه ورابطه واسم الموديل، واضغط «تحقق» ليتأكد أنه يعمل.</p></div>
         <div class="card"><h3>👁️ معاينة الأكواد داخل الرد</h3><p>تحت أي كود يكتبه الذكاء الاصطناعي تجد زر <b>معاينة الكود</b> — يفتحه ويشغّله فورًا في بيئة معزولة: HTML، CSS، JavaScript، SVG، Markdown، JSON، <b>Python</b>، <b>Lua</b>.</p></div>
+        <div class="card"><h3>💰 الاستخدام والتكلفة</h3><p>تتبّع كل طلب: الرموز، التكلفة التقريبية بالدولار، رسم بياني لآخر 7 أيام، وتفصيل حسب الموديل والمزوّد. وتصدير CSV.</p></div>
+        <div class="card"><h3>⚖️ مقارنة النماذج</h3><p>اسأل نفس السؤال لـ 4 نماذج في نفس الوقت، وشوف الفرق جنب بعض: السرعة، التكلفة، وجودة الرد.</p></div>
+        <div class="card"><h3>🔒 قفل التطبيق</h3><p>رمز حماية من 4 أرقام يحمي مفاتيح API ومحادثاتك على الجهاز.</p></div>
+        <div class="card"><h3>⚡ أوامر سريعة</h3><p>شرائح جاهزة فوق صندوق الكتابة: ترجم، لخّص، اشرح كود، صلّح خطأ، أفكار، جدول…</p></div>
         <div class="card"><h3>📚 المكتبة</h3><p>كل محادثاتك في مكان واحد على جهازك، مع بحث بالاسم أو بمحتوى الرسائل، وفلتر يفصل محادثات الوكلاء عن محادثاتك.</p></div>
         <div class="card"><h3>📴 يعمل كتطبيق</h3><p>${window.MosaaidiNative ? 'أنت تستخدم الآن تطبيق أندرويد (APK) — كل شيء يعمل بدون متصفح.' : 'من المتصفح: القائمة ← «إضافة إلى الشاشة الرئيسية» ليعمل كتطبيق مستقل.'}</p></div>
       </div>
@@ -1551,7 +1855,18 @@ function bindEvents() {
   $('#menuBtn').onclick = openDrawer;
   $('#sidebarClose').onclick = closeDrawer;
   $('#scrim').onclick = closeDrawer;
-  document.querySelectorAll('[data-goto]').forEach((b) => { b.onclick = () => goto(b.dataset.goto); });
+  document.querySelectorAll('[data-goto]').forEach((b) => {
+    b.onclick = () => {
+      const v = b.dataset.goto;
+      if (v === 'chat') {
+        if (state.current) goto('chat', { title: state.current.title });
+        else if (state.conversations[0]) openConversation(state.conversations[0].id);
+        else goto('chats');
+        return;
+      }
+      goto(v);
+    };
+  });
   document.querySelectorAll('[data-new-chat]').forEach((b) => { b.onclick = () => newChat(); });
   $('#newChatBtn').onclick = () => newChat();
   $('#exportBtn').onclick = doExport;
@@ -1653,8 +1968,19 @@ async function boot() {
     state.providerId = state.settings.defaultProvider;
     state.model = state.settings.defaultModel;
     bindEvents();
+    renderQuickChips();
     goto('chats');
     if (state.settings.notifyOnFinish !== false) requestNotifyPermission();
+
+    // قفل التطبيق
+    state.lock = new LockScreen({ onUnlock: () => toast('أهلاً بيك في مِشْكاة 👋') });
+    if (await isLockEnabled()) state.lock.show();
+    document.addEventListener('visibilitychange', async () => {
+      if (document.hidden) { state.hiddenAt = Date.now(); return; }
+      if (state.hiddenAt && Date.now() - state.hiddenAt > 60000 && (await isLockEnabled())) {
+        state.lock.show('أدخل رمز الحماية للمتابعة');
+      }
+    });
     renderChatHead();
   } catch (e) {
     console.error(e);
@@ -1669,4 +1995,5 @@ async function boot() {
 boot();
 
 /* متاح للاختبار من الكونسول */
-window.mosaaidi = { state, goto, newChat, sendMessage, renderSettings };
+window.mishkat = { state, goto, newChat, sendMessage, renderSettings, renderUsage, renderCompare };
+window.mosaaidi = window.mishkat;

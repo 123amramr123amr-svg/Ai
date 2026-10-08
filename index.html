@@ -7,8 +7,8 @@
 <meta name="description" content="مساعد الذكاء الاصطناعي المتعدد: أضف مفاتيح API الخاصة بك، وتحدّث بالصوت والصورة والملفات، وشغّل الأكواد في صفحة Preview." />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="مساعدي" />
-<title>مساعدي — AI متعدد النماذج</title>
+<meta name="apple-mobile-web-app-title" content="مِشْكاة" />
+<title>مِشْكاة — مساعدك الذكي بمفاتيحك الخاصة</title>
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -23,8 +23,8 @@
     <div class="brand">
       <img src="icons/icon.svg" alt="" class="brand-logo" />
       <div class="brand-text">
-        <strong>مساعدي</strong>
-        <span>AI متعدد النماذج</span>
+        <strong>مِشْكاة</strong>
+        <span>مساعدك الذكي بمفاتيحك</span>
       </div>
       <button class="icon-btn sidebar-close" id="sidebarClose" title="إغلاق" aria-label="إغلاق القائمة">✕</button>
     </div>
@@ -34,6 +34,8 @@
     <nav class="nav">
       <button class="nav-item" data-goto="chats">📚 المكتبة</button>
       <button class="nav-item" data-goto="agents">🤖 الوكلاء (Agents)</button>
+      <button class="nav-item" data-goto="usage">💰 الاستخدام والتكلفة</button>
+      <button class="nav-item" data-goto="compare">⚖️ مقارنة النماذج</button>
       <button class="nav-item" data-goto="settings">⚙️ الإعدادات والمفاتيح</button>
       <button class="nav-item" data-goto="about">ℹ️ عن التطبيق</button>
     </nav>
@@ -61,7 +63,7 @@
 
     <section class="view" id="view-chats">
       <div class="library-head">
-        <h1>📚 المكتبة</h1>
+        <h1>📚 مكتبتك</h1>
         <p>كل محادثاتك محفوظة هنا على جهازك — ابحث بالاسم أو بمحتوى الرسائل.</p>
         <div class="library-actions">
           <button class="btn primary" data-new-chat>＋ محادثة جديدة</button>
@@ -88,6 +90,7 @@
       <div class="composer-wrap">
         <div class="attachments" id="attachments" hidden></div>
         <div class="attachments" id="toolLog" hidden></div>
+        <div class="quick-chips" id="quickChips"></div>
         <form class="composer" id="composer">
           <button type="button" class="icon-btn" id="attachBtn" title="إرفاق ملفات">📎</button>
           <input type="file" id="fileInput" multiple hidden />
@@ -103,6 +106,8 @@
     </section>
 
     <section class="view" id="view-agents" hidden></section>
+    <section class="view" id="view-usage" hidden></section>
+    <section class="view" id="view-compare" hidden></section>
     <section class="view" id="view-settings" hidden></section>
     <section class="view" id="view-about" hidden></section>
   </main>
@@ -130,6 +135,32 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- شريط التنقّل السفلي (للموبايل) -->
+<nav class="tabbar" id="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab active" data-goto="chats"><span class="tab-ico">📚</span>المكتبة</button>
+    <button class="tab" data-goto="chat"><span class="tab-ico">💬</span>محادثة</button>
+    <button class="tab" data-goto="compare"><span class="tab-ico">⚖️</span>مقارنة</button>
+    <button class="tab" data-goto="usage"><span class="tab-ico">💰</span>الاستخدام</button>
+    <button class="tab" data-goto="settings"><span class="tab-ico">⚙️</span>الإعدادات</button>
+  </div>
+</nav>
+
+<!-- شاشة القفل -->
+<div class="lock-screen" id="lockScreen" hidden>
+  <img class="lock-logo" src="icons/icon.svg" alt="مِشْكاة" />
+  <div class="lock-title">مِشْكاة</div>
+  <div class="lock-sub" id="lockSub">أدخل رمز الحماية للمتابعة</div>
+  <div class="pin-dots" id="pinDots"><i></i><i></i><i></i><i></i></div>
+  <div class="keypad" id="keypad">
+    <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+    <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+    <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+    <button data-k="del">⌫</button><button data-k="0">0</button><button data-k="ok">✓</button>
+  </div>
+  <div class="lock-err" id="lockErr"></div>
 </div>
 
 <div id="toast" class="toast" hidden></div>
