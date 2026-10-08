@@ -7,7 +7,8 @@ import { fileToAttachment, attachmentDataUrl, attachmentBlob, VoiceRecorder, spe
 import { renderMarkdown, extractArtifacts, langLabel } from './markdown.js';
 import { TOOL_DEFS, TOOL_LIST, runAgentLoop } from './tools.js';
 import { runInFrame, stopFrame, attachRunner, artifactToHtmlFile, artifactFileName, buildDoc } from './preview.js';
-import { uid, esc, fmtTime, bytes, clampText, download, copyText, debounce } from './util.js';
+import { runtimeOf, runtimeLabel, needsOnline, SUPPORTED_LANGS } from './runtimes.js';
+import { uid, esc, fmtTime, bytes, clampText, download, copyText, debounce, nativeApp } from './util.js';
 
 /* ============================ الحالة ============================ */
 export const state = {
@@ -23,6 +24,9 @@ export const state = {
   providerId: '',
   model: '',
   search: '',
+  libQuery: '',
+  libFilter: 'all',
+  msgIndex: null,
   settings: {},
   toolSteps: [],
 };
@@ -69,8 +73,8 @@ function applyTheme(theme) {
 
 /* ============================ التوجيه (Router) ============================ */
 const VIEW_TITLES = {
-  chats: 'المحادثات', chat: 'محادثة', agents: 'الوكلاء (Agents)',
-  preview: 'المعاينة (Preview)', settings: 'الإعدادات والمفاتيح', about: 'عن التطبيق',
+  chats: 'المكتبة', chat: 'محادثة', agents: 'الوكلاء (Agents)',
+settings: 'الإعدادات والمفاتيح', about: 'عن التطبيق',
 };
 
 export function goto(view, opts = {}) {
@@ -82,7 +86,6 @@ export function goto(view, opts = {}) {
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.goto === view));
   document.body.classList.remove('drawer-open');
   if (view === 'agents') renderAgents();
-  if (view === 'preview') renderPreview();
   if (view === 'settings') renderSettings();
   if (view === 'about') renderAbout();
   if (view === 'chats') renderChatsHome();
@@ -101,7 +104,7 @@ const DEFAULTS = {
   maxTokens: 4096,
   temperature: 0.7,
   autoTitle: true,
-  autoPreview: true,
+  notifyOnFinish: true,
   speakReplies: false,
   agentsEnabled: true,
   fetchProxy: 'https://r.jina.ai/',
@@ -165,7 +168,7 @@ export function renderConversations() {
 export async function createConversation(partial = {}) {
   const providerId = partial.providerId || state.providerId || state.settings.defaultProvider;
   const model = partial.model || state.model || state.settings.defaultModel;
-  const conv = await Conversations.create({ ...partial, providerId, model });
+  const conv = await Conversations.create({ ...partial, providerId, model, kind: partial.agentId ? 'agent' : 'chat' });
   state.conversations.unshift(conv);
   renderConversations();
   return conv;
@@ -214,6 +217,29 @@ async function confirmDeleteConversation(id) {
   });
 }
 
+export async function renameConversation(id) {
+  const conv = state.conversations.find((c) => c.id === id);
+  if (!conv) return;
+  openModal({
+    title: 'اسم المحادثة',
+    body: `<div class="field"><label>الاسم</label><input id="convTitleInput" value="${esc(conv.title)}" /></div>`,
+    actions: [
+      { label: 'إلغاء', onClick: closeModal },
+      { label: 'حفظ', className: 'primary', onClick: async () => {
+        const v = $('#convTitleInput').value.trim() || 'محادثة';
+        await Conversations.update(id, { title: v });
+        conv.title = v;
+        renderConversations();
+        renderLibrary();
+        if (state.current?.id === id) $('#topbarTitle').textContent = v;
+        closeModal();
+        toast('تم الحفظ');
+      } },
+    ],
+  });
+  setTimeout(() => $('#convTitleInput')?.select(), 60);
+}
+
 export async function renameCurrentConversation() {
   if (!state.current) return;
   openModal({
@@ -235,20 +261,112 @@ export async function renameCurrentConversation() {
   setTimeout(() => $('#convTitleInput')?.select(), 60);
 }
 
-/* ============================ الصفحة الرئيسية ============================ */
+/* ============================ المكتبة (كل المحادثات) ============================ */
+function convKind(c) { return c.agentId ? 'agent' : 'chat'; }
+
+function highlight(text, q) {
+  const safe = esc(text || '');
+  if (!q) return safe;
+  try {
+    const safeQ = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + safeQ + ')', 'gi');
+    return safe.replace(re, '<mark>$1</mark>');
+  } catch { return safe; }
+}
+
+/* فهرس نص الرسائل للبحث داخل المحتوى (يُبنى مرة واحدة ويُحدَّث عند الحاجة) */
+async function ensureMsgIndex() {
+  if (state.msgIndex) return state.msgIndex;
+  const all = await Messages.all();
+  const map = new Map();
+  for (const m of all) {
+    const text = (m.content || []).filter((p) => p.type === 'text').map((p) => p.text).join(' ');
+    if (!text) continue;
+    map.set(m.conversationId, ((map.get(m.conversationId) || '') + ' ' + text).slice(0, 20000));
+  }
+  state.msgIndex = map;
+  return map;
+}
+
+function invalidateMsgIndex() { state.msgIndex = null; }
+
+async function renderLibrary() {
+  const q = (state.libQuery || '').trim();
+  const filter = state.libFilter || 'all';
+  const box = $('#libList');
+  const count = $('#libCount');
+  if (!box) return;
+
+  const index = q.length >= 2 ? await ensureMsgIndex() : null;
+  const ql = q.toLowerCase();
+
+  let list = state.conversations.filter((c) => filter === 'all' || convKind(c) === filter);
+  if (q) {
+    list = list.filter((c) => {
+      if ((c.title || '').toLowerCase().includes(ql)) return true;
+      const body = (index?.get(c.id) || '').toLowerCase();
+      return body.includes(ql);
+    });
+  }
+
+  if (count) count.textContent = `${list.length} محادثة${q ? ' مطابقة للبحث' : ''} — محفوظة على جهازك`;
+
+  if (!list.length) {
+    box.innerHTML = `<div class="empty">${q ? 'لا نتائج للبحث «' + esc(q) + '»' : 'لا توجد محادثات بعد — ابدأ محادثة جديدة ✨'}</div>`;
+    return;
+  }
+
+  box.innerHTML = list.map((c) => {
+    const isAgent = convKind(c) === 'agent';
+    const agent = isAgent ? state.agents.find((a) => a.id === c.agentId) : null;
+    const body = index?.get(c.id) || '';
+    let snippet = c.lastSnippet || '';
+    if (!snippet && q && body) {
+      const i = body.toLowerCase().indexOf(ql);
+      snippet = i >= 0 ? '…' + body.slice(Math.max(0, i - 30), i + 70) : body.slice(0, 90);
+    }
+    if (!snippet) snippet = isAgent ? 'محادثة مع وكيل' : 'محادثة';
+    return `<div class="lib-card" data-open-conv="${c.id}">
+      <div class="lc-emoji">${agent?.emoji || (isAgent ? '🤖' : '💬')}</div>
+      <div class="lc-main">
+        <div class="lc-title">${highlight(c.title || 'محادثة', q)} ${isAgent ? '<span class="badge">وكيل' + (agent ? ': ' + esc(agent.name) : '') + '</span>' : ''}</div>
+        <div class="lc-snippet">${q ? highlight(snippet, q) : esc(clampText(snippet, 90))}</div>
+        <div class="lc-sub">${esc(c.model || 'بدون موديل')} • ${fmtTime(c.updatedAt)}${(c.msgCount ? ' • ' + c.msgCount + ' رسالة' : '')}</div>
+      </div>
+      <div class="lc-actions">
+        <button class="btn sm" data-rename-conv="${c.id}">✏️</button>
+        <button class="btn sm danger" data-del-conv="${c.id}">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  box.querySelectorAll('[data-open-conv]').forEach((el) => {
+    el.onclick = (e) => {
+      if (e.target.closest('[data-rename-conv]') || e.target.closest('[data-del-conv]')) return;
+      openConversation(el.dataset.openConv);
+    };
+  });
+  box.querySelectorAll('[data-rename-conv]').forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); renameConversation(b.dataset.renameConv); };
+  });
+  box.querySelectorAll('[data-del-conv]').forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); confirmDeleteConversation(b.dataset.delConv); };
+  });
+}
+
 async function renderChatsHome() {
   const avail = await availableProviders();
-  const arts = await Artifacts.list();
-  const memory = state.settings.memory || [];
   const cards = [
-    { t: '🔑 المفاتيح المضافة', d: `${avail.length} مزوّد متاح من ${allProviders().length} (منها ${getCustomProviders().length} نموذج خاص بك). ${avail.length ? 'جاهز للاستخدام.' : 'أضف مفتاحًا للبدء.'}` },
-    { t: '💬 محادثاتك', d: `${state.conversations.length} محادثة محفوظة على جهازك.` },
-    { t: '🧪 مشاريع المعاينة', d: `${arts.length} كود محفوظ يمكن تشغيله فورًا.` },
-    { t: '🧠 ذاكرة المساعد', d: `${memory.length} معلومة محفوظة عنك.` },
+    { t: '🔑 المفاتيح المضافة', d: `${avail.length} مزوّد متاح من ${allProviders().length} (منها ${getCustomProviders().length} نموذج خاص بك).` },
+    { t: '📚 محادثاتك', d: `${state.conversations.length} محادثة محفوظة على جهازك — ابحث فيها بالاسم أو بمحتوى الرسائل.` },
+    { t: '👁️ معاينة الأكواد', d: 'أي كود يكتبه الذكاء الاصطناعي يظهر تحته زر عين 👁️ يشغّله فورًا: HTML، CSS، JS، Python، Lua…' },
+    { t: '🧠 ذاكرة المساعد', d: `${(state.settings.memory || []).length} معلومة محفوظة عنك.` },
     { t: '🎤 صوت وصور وفيديو', d: 'أرسل ما تشاء — والصوت يتحوّل لنص تلقائيًا.' },
-    { t: '🤖 الوكلاء', d: 'وكلاء جاهزون يستخدمون الأدوات: كود، بحث، صور، معاينة.' },
+    { t: '🔔 إشعار عند الانتهاء', d: 'لو خرجت من التطبيق يكمل الرد ويبعتلك إشعار لما يخلص.' },
   ];
-  $('#quickCards').innerHTML = cards.map((c) => `<div class="card"><h3>${c.t}</h3><p>${c.d}</p></div>`).join('');
+  const qc = $('#quickCards');
+  if (qc) qc.innerHTML = cards.map((c) => `<div class="card"><h3>${c.t}</h3><p>${c.d}</p></div>`).join('');
+  await renderLibrary();
 }
 
 /* ============================ ترويسة المحادثة ============================ */
@@ -273,7 +391,6 @@ async function renderChatHead() {
     <datalist id="modelList">${models.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>
     <button class="icon-btn" id="refreshModels" title="جلب الموديلات من المزوّد">🔄</button>
     <span class="spacer"></span>
-    <button class="btn sm" id="autoPreviewBtn" title="تشغيل الأكواد تلقائيًا داخل الردود">🖥️ ${state.settings.autoPreview === false ? 'تلقائي: موقوف' : 'تلقائي: مفعّل'}</button>
     <button class="btn sm" id="renameConv" title="تغيير اسم المحادثة">✏️ الاسم</button>
     <button class="btn sm" id="clearConv" title="مسح رسائل هذه المحادثة">🧹</button>
   `;
@@ -307,12 +424,6 @@ async function renderChatHead() {
     $('#modelList').innerHTML = m.map((x) => `<option value="${esc(x)}"></option>`).join('');
     toast(fromApi ? `تم جلب ${m.length} موديل من المزوّد` : `القائمة المقترحة (${m.length} موديل)`);
   };
-  $('#autoPreviewBtn').onclick = async () => {
-    const on = state.settings.autoPreview === false;
-    await setSetting('autoPreview', on);
-    renderChatHead();
-    toast(on ? 'المعاينة التلقائية مفعّلة — أي كود من الردود سيعمل تلقائيًا' : 'المعاينة التلقائية موقوفة');
-  };
   $('#renameConv').onclick = renameCurrentConversation;
   $('#clearConv').onclick = async () => {
     await Messages.removeByConversation(state.current.id);
@@ -340,25 +451,7 @@ function updateHint() {
 
 /* ============================ عرض الرسائل ============================ */
 const codeRegistry = new Map(); // key -> {lang, code}
-const liveRunners = new Map(); // key -> دالة إلغاء الاستماع للسجل
 
-/* هل هذا الكود قابل للتشغيل في المتصفح؟ */
-const isLiveRunnable = (lang) => ['html', 'htm', 'svg', 'xml', 'css', 'js', 'javascript', 'mjs', 'jsx'].includes((lang || '').toLowerCase());
-
-/* إنشاء كتلة معاينة حيّة */
-function liveBlockHtml(key, lang) {
-  const running = liveRunners.has(key);
-  return `<div class="code-live" data-live="${key}">
-    <div class="live-bar">
-      <span class="badge ${running ? 'ok' : ''}">🖥️ معاينة حيّة</span>
-      <button class="btn sm ok" data-run-live="${key}">${running ? '🔄 إعادة تشغيل' : '▶️ تشغيل هنا'}</button>
-      <button class="btn sm" data-stop-live="${key}" ${running ? '' : 'hidden'}>⏹ إيقاف</button>
-      <button class="btn sm" data-open-preview="${key}">🪟 في صفحة المعاينة</button>
-      <button class="btn sm" data-full-live="${key}">⛶ ملء العرض</button>
-    </div>
-    <div class="live-body"></div>
-  </div>`;
-}
 
 function partHtml(p, msgId) {
   if (p.type === 'text') return '';
@@ -386,9 +479,9 @@ function messageBodyHtml(m) {
             <span class="badge">${esc(langLabel(b.lang))}</span>
             <button class="btn sm" data-copy="${key}">📋 نسخ</button>
             <button class="btn sm" data-copy-file="${key}">⬇️ تنزيل</button>
-            ${runnable ? `<button class="btn sm" data-run="${key}">📌 حفظ في مكتبة المعاينة</button>` : ''}
+            ${runnable ? `<button class="btn sm" data-run="${key}">💾 حفظ في السجل</button>` : ''}
           </div>
-          ${runnable ? liveBlockHtml(key, b.lang) : ''}
+          ${runnable ? eyeBarHtml(key, b.lang, b.code) : ''}
           <pre><code class="lang-${esc(b.lang)}">${b.code}</code></pre>
         </div>`;
       },
@@ -424,9 +517,6 @@ function renderMessage(m) {
 
 export function renderMessages() {
   const box = $('#messages');
-  // تنظيف مستمعي المعاينات القديمة (الإطارات تُدمَّر مع إعادة الرسم)
-  for (const off of liveRunners.values()) { try { off(); } catch {} }
-  liveRunners.clear();
   if (!state.current) { box.innerHTML = ''; return; }
   if (!state.messages.length) {
     box.innerHTML = `<div class="empty">
@@ -438,7 +528,6 @@ export function renderMessages() {
   }
   box.innerHTML = state.messages.map(renderMessage).join('');
   wireMessageActions();
-  autoRunLivePreviews();
 }
 
 function wireMessageActions() {
@@ -453,35 +542,15 @@ function wireMessageActions() {
       download(`code-${Date.now()}.${ext}`, c.code, 'text/plain;charset=utf-8');
     };
   });
-  $$('#messages [data-run-live]').forEach((b) => {
-    b.onclick = () => runLivePreview(b.dataset.runLive);
-  });
-  $$('#messages [data-stop-live]').forEach((b) => {
-    b.onclick = () => stopLivePreview(b.dataset.stopLive);
-  });
-  $$('#messages [data-full-live]').forEach((b) => {
-    b.onclick = () => {
-      const block = document.querySelector(`[data-live="${b.dataset.fullLive}"] iframe`);
-      if (block) block.style.height = block.style.height === '80vh' ? '' : '80vh';
-    };
-  });
-  $$('#messages [data-open-preview]').forEach((b) => {
-    b.onclick = async () => {
-      const c = codeRegistry.get(b.dataset.openPreview);
-      if (!c) return;
-      const art = await ensureArtifact(c, 'كود من المحادثة');
-      goto('preview');
-      setTimeout(() => selectArtifact(art.id), 60);
-    };
+  $$('#messages [data-eye]').forEach((b) => {
+    b.onclick = () => openPreviewOverlay(b.dataset.eye);
   });
   $$('#messages [data-run]').forEach((b) => {
     b.onclick = async () => {
       const c = codeRegistry.get(b.dataset.run);
       if (!c) return;
-      const art = await ensureArtifact(c, 'كود من المحادثة');
-      goto('preview');
-      setTimeout(() => selectArtifact(art.id), 60);
-      toast('تم حفظ الكود في مكتبة المعاينة');
+      await ensureArtifact(c, 'كود من المحادثة');
+      toast('تم حفظ الكود في السجل');
     };
   });
   $$('#messages [data-msg-copy]').forEach((b) => {
@@ -641,8 +710,9 @@ export async function sendMessage() {
 
   const userMsg = await Messages.add({ conversationId: state.current.id, role: 'user', content: parts });
   state.messages.push(userMsg);
+  await touchConversationMeta();
   state.attachments = [];
-  input.value = '';
+  input.value = 
   autoResize(input);
   renderAttachments();
   state.toolSteps = [];
@@ -686,7 +756,9 @@ function startStreamBubble() {
 }
 
 async function runTurn({ providerId, model, agent }) {
+  const startedAt = Date.now();
   setStreamingUI(true);
+  document.title = '⏳ جارٍ الرد… — مساعدي';
   state.controller = new AbortController();
   state.toolSteps = [];
   renderToolLog();
@@ -757,8 +829,8 @@ async function runTurn({ providerId, model, agent }) {
         },
         onArtifact: (art) => {
           state.artifacts.unshift(art);
-          bubble.querySelector('.bubble').insertAdjacentHTML('beforeend', `<div class="code-actions"><span class="badge ok">🧪 ${esc(art.title)} جاهز في المعاينة</span></div>`);
-          toast('أضاف الوكيل كودًا جديدًا في صفحة المعاينة');
+          bubble.querySelector('.bubble').insertAdjacentHTML('beforeend', `<div class="code-actions"><span class="badge ok">👁️ ${esc(art.title)} — اضغط زر المعاينة تحت الكود لتشغيله</span></div>`);
+          toast('أضاف الوكيل كودًا جديدًا — شغّله بزر 👁️ تحت الكود');
         },
         onFile: (f) => {
           bubble.querySelector('.bubble').insertAdjacentHTML('beforeend', `<span class="file-chip">📄 ${esc(f.name)} <small>${bytes(f.size)}</small></span>`);
@@ -798,12 +870,19 @@ async function runTurn({ providerId, model, agent }) {
   renderToolLog();
   renderMessages();
   scrollMessages();
-  await Conversations.touch(state.current.id);
+  await touchConversationMeta();
 
-  // كل كود في الرد يُحفظ تلقائيًا في مكتبة المعاينة
+  // إشعار لو المستخدم خرج من التطبيق أو الرد أخد وقتًا طويلًا
+  document.title = 'مساعدي — AI متعدد النماذج';
+  const took = Date.now() - startedAt;
+  if (state.settings.notifyOnFinish !== false && (document.hidden || took > 20000) && finalText) {
+    notify('✅ تم الرد', clampText(finalText, 110));
+  }
+
+  // كل كود في الرد يُحفظ تلقائيًا في السجل
   try {
     const arts = await persistArtifactsFromMessage(saved);
-    if (arts.length && state.view === 'chat') toast(`🖥️ جاهز للتشغيل: ${arts.length} كود في المعاينة`);
+    if (arts.length && state.view === 'chat') toast(`👁️ جاهز للمعاينة: ${arts.length} كود — اضغط زر المعاينة تحت الكود`);
   } catch (e) { console.warn(e); }
 
   if (state.settings.speakReplies && finalText) { try { speak(finalText); } catch {} }
@@ -819,7 +898,7 @@ const BUILTIN_AGENTS = [
   },
   {
     id: 'ag_coder', name: 'مبرمج محترف', emoji: '💻', builtin: true, temperature: 0.3,
-    system: 'أنت مهندس برمجيات خبير. اكتب كودًا كاملًا وقابلًا للتشغيل، واشرح باختصار. عندما تكتب واجهة أو لعبة أو تطبيق ويب استخدم أداة create_preview لتحفظ الكود في صفحة المعاينة ليشغّله المستخدم فورًا. اختبر منطق الكود بأداة run_javascript قبل الرد.',
+    system: 'أنت مهندس برمجيات خبير. اكتب كودًا كاملًا وقابلًا للتشغيل، واشرح باختصار. اكتب الكود داخل كتلة ```مع تحديد اللغة``` لأن المستخدم سيجد زر معاينة 👁️ تحت الرد يشغّل الكود فورًا (HTML/CSS/JS/Python/Lua/Markdown/JSON). اختبر منطق الكود بأداة run_javascript قبل الرد.',
     tools: ['run_javascript', 'create_preview', 'write_file', 'read_file', 'calculator', 'fetch_url', 'current_datetime'],
   },
   {
@@ -943,87 +1022,93 @@ async function agentModal(agent) {
   });
 }
 
-/* ============================ المعاينة الحيّة داخل الردود ============================ */
+/* ============================ المعاينة (من داخل الردود) ============================ */
+let pvState = { key: null, lang: 'html', code: '', off: null };
+
 function simpleHash(str) {
   let h = 5381;
   for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
   return 'h' + (h >>> 0).toString(36) + '_' + str.length;
 }
 
-/* تشغيل كود داخل كتلة في الرد نفسه */
-function runLivePreview(key) {
+/* زر العين الذي يظهر تحت كل رد فيه كود قابل للتشغيل */
+function eyeBarHtml(key, lang, code) {
+  const rt = runtimeOf(lang, code);
+  const online = rt?.online ? ' • يحتاج إنترنت أول مرة' : '';
+  return `<div class="pv-eye">
+    <button class="pv-eye-btn" data-eye="${key}" title="افتح المعاينة وشغّل الكود">👁️ معاينة الكود</button>
+    <span class="pv-eye-hint">${rt?.icon || '💻'} ${esc(runtimeLabel(lang, code))}${online}</span>
+  </div>`;
+}
+
+/* فتح نافذة المعاينة لكود معيّن */
+export async function openPreviewOverlay(key) {
   const c = codeRegistry.get(key);
-  const block = document.querySelector(`[data-live="${key}"]`);
-  if (!c || !block) return null;
-  const body = block.querySelector('.live-body');
-  body.innerHTML = '';
+  if (!c) return;
+  pvState.key = key;
+  pvState.lang = c.lang || 'html';
+  pvState.code = c.code;
 
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals allow-popups allow-downloads');
-  iframe.setAttribute('title', 'معاينة حيّة');
-  body.appendChild(iframe);
+  const ov = $('#pvOverlay');
+  ov.hidden = false;
+  ov.classList.remove('pv-max');
+  document.body.style.overflow = 'hidden';
+  $('#pvTitle').textContent = c.title || 'معاينة الكود';
+  $('#pvLangBadge').textContent = `${runtimeLabel(c.lang, c.code)}`;
+  $('#pvCodeEdit').value = c.code;
+  runOverlayPreview();
+}
 
-  const logBox = document.createElement('div');
-  logBox.className = 'pv-log';
-  logBox.textContent = 'سجل التشغيل…';
-  body.appendChild(logBox);
+function closePreviewOverlay() {
+  const ov = $('#pvOverlay');
+  ov.hidden = true;
+  document.body.style.overflow = '';
+  if (pvState.off) { try { pvState.off(); } catch {} pvState.off = null; }
+  try { stopFrame($('#pvFrame')); } catch {}
+}
 
-  const prev = liveRunners.get(key);
-  if (prev) { try { prev(); } catch {} }
-  const off = attachRunner(iframe, {
+function runOverlayPreview() {
+  const code = $('#pvCodeEdit').value;
+  pvState.code = code;
+  const lang = pvState.lang;
+  const logs = $('#pvLog');
+  logs.textContent = 'جارٍ التشغيل…';
+  if (pvState.off) { try { pvState.off(); } catch {} }
+  pvState.off = attachRunner($('#pvFrame'), {
     onLog: (l) => {
-      const line = (l.type === 'error' ? '❌ ' : l.type === 'warn' ? '⚠️ ' : '› ') + l.text;
-      logBox.textContent = (logBox.textContent === 'سجل التشغيل…' ? '' : logBox.textContent + '\n') + line;
-      logBox.scrollTop = logBox.scrollHeight;
+      const line = (l.type === 'error' ? '❌ ' : l.type === 'warn' ? '⚠️ ' : l.type === 'done' ? '✅ ' : '› ') + l.text;
+      logs.textContent = (logs.textContent === 'جارٍ التشغيل…' ? '' : logs.textContent + '\n') + line;
+      logs.scrollTop = logs.scrollHeight;
     },
   });
-  liveRunners.set(key, off);
-  iframe.srcdoc = buildDoc({ lang: c.lang, code: c.code });
-
-  const bar = block.querySelector('.live-bar');
-  if (bar) {
-    bar.querySelector('[data-run-live]').textContent = '🔄 إعادة تشغيل';
-    const badge = bar.querySelector('.badge');
-    if (badge) badge.classList.add('ok');
-    const stop = bar.querySelector('[data-stop-live]');
-    if (stop) stop.hidden = false;
+  if (needsOnline(lang, code) && navigator.onLine === false) {
+    logs.textContent = '⚠️ هذه اللغة تحتاج إنترنت أول مرة لتحميل المفسّر — أنت غير متصل الآن.';
   }
-  if (!state.liveRan) state.liveRan = new Set();
-  state.liveRan.add(key);
-  return iframe;
+  runInFrame($('#pvFrame'), { lang, code });
 }
 
-function stopLivePreview(key) {
-  const off = liveRunners.get(key);
-  if (off) { try { off(); } catch {} liveRunners.delete(key); }
-  const block = document.querySelector(`[data-live="${key}"]`);
-  if (!block) return;
-  block.querySelector('.live-body').innerHTML = '';
-  const bar = block.querySelector('.live-bar');
-  if (bar) {
-    bar.querySelector('[data-run-live]').textContent = '▶️ تشغيل هنا';
-    const badge = bar.querySelector('.badge');
-    if (badge) badge.classList.remove('ok');
-    const stop = bar.querySelector('[data-stop-live]');
-    if (stop) stop.hidden = true;
-  }
+function wirePreviewOverlay() {
+  $('#pvClose').onclick = closePreviewOverlay;
+  $('#pvRun').onclick = runOverlayPreview;
+  $('#pvStop').onclick = () => { stopFrame($('#pvFrame')); $('#pvLog').textContent = 'تم الإيقاف.'; };
+  $('#pvFull').onclick = () => $('#pvOverlay').classList.toggle('pv-max');
+  $('#pvCopy').onclick = async () => { await copyText($('#pvCodeEdit').value); toast('تم نسخ الكود'); };
+  $('#pvDl').onclick = () => {
+    const art = { title: $('#pvTitle').textContent || 'code', lang: pvState.lang, code: $('#pvCodeEdit').value };
+    if (needsOnline(pvState.lang, pvState.code)) {
+      download(artifactFileName(art), $('#pvCodeEdit').value, 'text/plain;charset=utf-8');
+    } else {
+      download(artifactFileName(art), artifactToHtmlFile(art), 'text/html;charset=utf-8');
+    }
+  };
+  $('#pvCodeEdit').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runOverlayPreview(); }
+    if (e.key === 'Escape') { e.preventDefault(); closePreviewOverlay(); }
+  });
+  $('#pvOverlay').onclick = (e) => { if (e.target.id === 'pvOverlay') closePreviewOverlay(); };
 }
 
-/* تشغيل تلقائي لآخر كود كتبه الذكاء الاصطناعي */
-function autoRunLivePreviews() {
-  if (state.settings.autoPreview === false) return;
-  if (!state.liveRan) state.liveRan = new Set();
-  for (let i = state.messages.length - 1; i >= 0; i--) {
-    const m = state.messages[i];
-    if (m.role !== 'assistant') continue;
-    const keys = [...codeRegistry.keys()].filter((k) => k.startsWith(m.id + ':'));
-    const first = keys.find((k) => { const c = codeRegistry.get(k); return c && isLiveRunnable(c.lang); });
-    if (first && !state.liveRan.has(first)) runLivePreview(first);
-    return;
-  }
-}
-
-/* حفظ كود في مكتبة المعاينة (مع منع التكرار) */
+/* حفظ كود في الأرشيف (بدون واجهة) ليبقى محفوظًا في النسخ الاحتياطية */
 async function ensureArtifact(c, title) {
   const hash = simpleHash((c.lang || '') + '|' + c.code);
   const convId = state.current?.id || '';
@@ -1034,11 +1119,11 @@ async function ensureArtifact(c, title) {
   return art;
 }
 
-/* عند وصول رد جديد: كل كود قابل للتشغيل يُحفظ تلقائيًا في مكتبة المعاينة */
+/* كل كود قابل للتشغيل في الرد يُحفظ تلقائيًا في السجل */
 async function persistArtifactsFromMessage(msg) {
   const text = (msg.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
-  if (!text || !/<[a-zA-Z!/]|function |=>|console\./.test(text)) return [];
-  const found = extractArtifacts(text).filter((f) => isLiveRunnable(f.lang));
+  if (!text) return [];
+  const found = extractArtifacts(text);
   const saved = [];
   for (const f of found) {
     const hash = simpleHash(f.lang + '|' + f.code);
@@ -1051,179 +1136,43 @@ async function persistArtifactsFromMessage(msg) {
   return saved;
 }
 
-/* ============================ صفحة المعاينة (Preview) ============================ */
-let previewLogs = [];
-let previewRunnerOff = null;
-
-export async function renderPreview() {
-  const view = $('#view-preview');
-  if (!state.artifacts.length) state.artifacts = await Artifacts.list();
-  const cur = state.artifacts.find((a) => a.id === state.previewId) || state.artifacts[0] || null;
-  state.previewId = cur?.id || '';
-
-  view.innerHTML = `
-    <div class="section">
-      <h2>🧪 صفحة المعاينة</h2>
-      <p class="sub">كل كود يكتبه لك الذكاء الاصطناعي يُحفظ هنا تلقائيًا مع رابط لمحادثته، ويُشغَّل داخل إطار معزول وآمن. والأسرع: المعاينة تعمل مباشرة تحت الكود في الرد نفسه — بدون ما تسيب المحادثة.</p>
-      <div class="row">
-        <button class="btn primary" id="runArt">▶️ تشغيل</button>
-        <button class="btn" id="stopArt">⏹ إيقاف</button>
-        <button class="btn" id="newArt">＋ كود جديد</button>
-        <button class="btn" id="saveArt">💾 حفظ التعديلات</button>
-        <button class="btn" id="dlArt">⬇️ تنزيل</button>
-        <button class="btn danger" id="delArt">🗑 حذف</button>
-        <label class="switch"><input type="checkbox" id="autoRun" ${state.settings.autoRunPreview ? 'checked' : ''} /> تشغيل تلقائي</label>
-      </div>
-    </div>
-    <div class="pv-split">
-      <div class="pv-frame-box">
-        <div class="pv-toolbar">
-          <b id="pvTitle" style="flex:1">${cur ? esc(cur.title) : 'لا يوجد كود'}</b>
-          <span class="badge" id="pvLang">${cur ? esc(langLabel(cur.lang)) : '—'}</span>
-          <button class="btn sm" id="clearLog">🧹 السجل</button>
-        </div>
-        <iframe class="pv-frame" id="pvFrame" title="معاينة الكود"></iframe>
-        <div class="pv-log" id="pvLog">سجل التشغيل سيظهر هنا…</div>
-      </div>
-      <div>
-        <div class="section" style="margin-bottom:12px">
-          <div class="field"><label>الكود</label><textarea class="pv-code" id="pvCode" spellcheck="false" placeholder="الصق كود HTML أو JavaScript هنا…">${cur ? esc(cur.code) : ''}</textarea></div>
-          <div class="row">
-            <div class="field" style="max-width:220px"><label>اللغة</label>
-              <select id="pvLangSel">
-                ${['html', 'js', 'css', 'svg'].map((l) => `<option value="${l}" ${cur?.lang === l ? 'selected' : ''}>${langLabel(l)}</option>`).join('')}
-              </select>
-            </div>
-            <div class="field"><label>اسم المشروع</label><input id="pvName" value="${cur ? esc(cur.title) : ''}" /></div>
-          </div>
-        </div>
-        <div class="section">
-          <h2>📂 مشاريعي (${state.artifacts.length})</h2>
-          <div id="artList"></div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  renderArtifactList();
-  if (previewRunnerOff) previewRunnerOff();
-  previewRunnerOff = attachRunner($('#pvFrame'), {
-    onLog: (l) => {
-      previewLogs.push(l);
-      if (previewLogs.length > 300) previewLogs = previewLogs.slice(-300);
-      const box = $('#pvLog');
-      if (box) box.textContent = previewLogs.map((x) => (x.type === 'error' ? '❌ ' : x.type === 'warn' ? '⚠️ ' : '› ') + x.text).join('\n');
-      if (box) box.scrollTop = box.scrollHeight;
-    },
-  });
-
-  $('#runArt').onclick = () => runCurrent();
-  $('#stopArt').onclick = () => { stopFrame($('#pvFrame')); toast('تم الإيقاف'); };
-  $('#clearLog').onclick = () => { previewLogs = []; $('#pvLog').textContent = 'سجل التشغيل سيظهر هنا…'; };
-  $('#autoRun').onchange = async (e) => { await setSetting('autoRunPreview', e.target.checked); };
-  $('#newArt').onclick = () => newArtifactModal();
-  $('#saveArt').onclick = saveCurrentArtifact;
-  $('#dlArt').onclick = () => {
-    const cur = state.artifacts.find((a) => a.id === state.previewId);
-    if (!cur) return toast('لا يوجد كود');
-    download(artifactFileName(cur), artifactToHtmlFile(cur), 'text/html;charset=utf-8');
-  };
-  $('#delArt').onclick = async () => {
-    const cur = state.artifacts.find((a) => a.id === state.previewId);
-    if (!cur) return toast('لا يوجد كود');
-    await Artifacts.remove(cur.id);
-    state.artifacts = await Artifacts.list();
-    state.previewId = state.artifacts[0]?.id || '';
-    renderPreview();
-    toast('تم الحذف');
-  };
-  $('#pvCode').addEventListener('keydown', (e) => {
-    if (e.key === 'Tab') { e.preventDefault(); const t = e.target; const s = t.selectionStart; t.value = t.value.slice(0, s) + '  ' + t.value.slice(t.selectionEnd); t.selectionStart = t.selectionEnd = s + 2; }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runCurrent(); }
-  });
-
-  if (cur && state.settings.autoRunPreview) runCurrent();
+/* ============================ الإشعارات (العمل في الخلفية) ============================ */
+export async function requestNotifyPermission() {
+  const native = nativeApp();
+  if (native && typeof native.notify === 'function') return true;
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  try { return (await Notification.requestPermission()) === 'granted'; } catch { return false; }
 }
 
-function renderArtifactList() {
-  const box = $('#artList');
-  if (!box) return;
-  if (!state.artifacts.length) { box.innerHTML = '<div class="empty">لا توجد أكواد بعد. اطلب من النموذج كتابة كود، أو أضف كودًا يدويًا.</div>'; return; }
-  box.innerHTML = state.artifacts.map((a) => {
-    const conv = state.conversations.find((c) => c.id === a.conversationId);
-    return `
-    <div class="list-item art-item" data-art="${a.id}" style="${a.id === state.previewId ? 'border-color:var(--acc)' : ''}">
-      <div style="font-size:20px">${a.kind === 'web' ? '🌐' : '📜'}</div>
-      <div class="li-main">
-        <b>${esc(a.title)} ${a.auto ? '<span class="badge ok">من رد الذكاء الاصطناعي</span>' : ''}</b>
-        <small>${esc(langLabel(a.lang))} • ${fmtTime(a.createdAt)}${conv ? ' • 💬 ' + esc(clampText(conv.title, 28)) : ''}</small>
-      </div>
-      ${conv ? `<button class="btn sm" data-goconv="${conv.id}">💬 الرد</button>` : ''}
-      <button class="btn sm" data-open="${a.id}">فتح</button>
-    </div>`;
-  }).join('');
-  box.querySelectorAll('[data-art]').forEach((el) => {
-    el.onclick = (e) => { if (e.target.dataset.goconv) return; selectArtifact(el.dataset.art); };
-  });
-  box.querySelectorAll('[data-goconv]').forEach((b) => {
-    b.onclick = (e) => { e.stopPropagation(); openConversation(b.dataset.goconv); };
-  });
+/* إشعار عند انتهاء الرد (يعمل وإنت بره التطبيق) */
+export function notify(title, body) {
+  const native = nativeApp();
+  if (native && typeof native.notify === 'function') {
+    try { native.notify(String(title), String(body || '')); return true; } catch { /* نتابع */ }
+  }
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification(String(title), { body: String(body || ''), icon: 'icons/icon-192.png', tag: 'mosaaidi', dir: 'rtl', lang: 'ar' });
+      return true;
+    }
+  } catch { /* نتجاهل */ }
+  return false;
 }
 
-export function selectArtifact(id) {
-  state.previewId = id;
-  const a = state.artifacts.find((x) => x.id === id);
-  if (!a) return;
-  $('#pvTitle').textContent = a.title;
-  $('#pvLang').textContent = langLabel(a.lang);
-  $('#pvCode').value = a.code;
-  $('#pvName').value = a.title;
-  $('#pvLangSel').value = a.lang;
-  renderArtifactList();
-  runCurrent();
-}
-
-function runCurrent() {
-  const cur = state.artifacts.find((a) => a.id === state.previewId);
-  const code = $('#pvCode')?.value || '';
-  const lang = $('#pvLangSel')?.value || cur?.lang || 'html';
-  if (!code.trim()) { toast('لا يوجد كود للتشغيل'); return; }
-  previewLogs = [];
-  $('#pvLog').textContent = 'جارٍ التشغيل…';
-  runInFrame($('#pvFrame'), { lang, code });
-}
-
-async function saveCurrentArtifact() {
-  const cur = state.artifacts.find((a) => a.id === state.previewId);
-  if (!cur) return;
-  const patch = { code: $('#pvCode').value, title: $('#pvName').value.trim() || cur.title, lang: $('#pvLangSel').value };
-  await Artifacts.remove(cur.id);
-  const rec = await Artifacts.add({ ...cur, ...patch, id: cur.id });
-  state.artifacts = await Artifacts.list();
-  renderArtifactList();
-  $('#pvTitle').textContent = rec.title;
-  $('#pvLang').textContent = langLabel(rec.lang);
-  toast('تم حفظ التعديلات');
-}
-
-function newArtifactModal() {
-  openModal({
-    title: 'كود جديد',
-    body: `<div class="field"><label>الاسم</label><input id="naName" placeholder="مشروعي" /></div>
-      <div class="field"><label>اللغة</label><select id="naLang"><option value="html">HTML</option><option value="js">JavaScript</option><option value="css">CSS</option><option value="svg">SVG</option></select></div>
-      <div class="field"><label>الكود</label><textarea class="pv-code" id="naCode" rows="10" placeholder="<!DOCTYPE html>…"></textarea></div>`,
-    actions: [
-      { label: 'إلغاء', onClick: closeModal },
-      { label: 'إضافة', className: 'primary', onClick: async () => {
-        const rec = await Artifacts.add({ title: $('#naName').value.trim() || 'كود جديد', lang: $('#naLang').value, code: $('#naCode').value, kind: 'web' });
-        state.artifacts = await Artifacts.list();
-        state.previewId = rec.id;
-        closeModal();
-        renderPreview();
-        toast('تمت الإضافة');
-      } },
-    ],
-  });
+/* تحديث بيانات المحادثة (عدد الرسائل + آخر مقتطف) للبحث في المكتبة */
+async function touchConversationMeta() {
+  if (!state.current) return;
+  const msgs = state.messages;
+  const last = [...msgs].reverse().find((m) => (m.content || []).some((p) => p.type === 'text'));
+  const snippet = last ? (last.content || []).filter((p) => p.type === 'text').map((p) => p.text).join(' ') : '';
+  const patch = { msgCount: msgs.length, lastSnippet: clampText(snippet, 120) };
+  Object.assign(state.current, patch);
+  const i = state.conversations.findIndex((c) => c.id === state.current.id);
+  if (i >= 0) Object.assign(state.conversations[i], patch);
+  await Conversations.update(state.current.id, patch);
+  invalidateMsgIndex();
 }
 
 /* ============================ الإعدادات ============================ */
@@ -1263,7 +1212,7 @@ async function renderSettings() {
       </div>
       <div class="field"><label>تعليمات النظام (System Prompt) الافتراضية</label><textarea id="sysPrompt" rows="4">${esc(state.settings.systemPrompt)}</textarea></div>
       <label class="switch"><input type="checkbox" id="autoTitle" ${state.settings.autoTitle ? 'checked' : ''} /> تسمية المحادثات تلقائيًا من أول رسالة</label>
-      <label class="switch"><input type="checkbox" id="autoPreviewChk" ${state.settings.autoPreview !== false ? 'checked' : ''} /> 🖥️ تشغيل أكواد الذكاء الاصطناعي تلقائيًا داخل الرد (معاينة حيّة)</label>
+      <label class="switch"><input type="checkbox" id="notifyChk" ${state.settings.notifyOnFinish !== false ? 'checked' : ''} /> 🔔 أرسل إشعارًا عندما ينتهي الرد (يعمل وإنت خارج التطبيق)</label>
       <label class="switch"><input type="checkbox" id="agentsEnabled" ${state.settings.agentsEnabled !== false ? 'checked' : ''} /> 🛠 تمكين أدوات الوكلاء تلقائيًا لكل النماذج (تنفيذ كود، بحث، توليد صور، ملفات، ذاكرة)</label>
       <label class="switch"><input type="checkbox" id="speakReplies" ${state.settings.speakReplies ? 'checked' : ''} /> قراءة الردود صوتيًا تلقائيًا</label>
       <label class="switch"><input type="checkbox" id="darkMode" ${state.settings.theme !== 'light' ? 'checked' : ''} /> الوضع الليلي</label>
@@ -1340,12 +1289,15 @@ async function renderSettings() {
       autoTitle: $('#autoTitle').checked,
       speakReplies: $('#speakReplies').checked,
       agentsEnabled: $('#agentsEnabled').checked,
-      autoPreview: $('#autoPreviewChk').checked,
+      notifyOnFinish: $('#notifyChk').checked,
       theme: $('#darkMode').checked ? 'dark' : 'light',
     });
     state.settings = { ...state.settings, ...(await Settings.all()) };
     applyTheme(state.settings.theme);
-    toast('تم حفظ الإعدادات');
+    if (state.settings.notifyOnFinish) {
+      const ok = await requestNotifyPermission();
+      toast(ok ? 'تم حفظ الإعدادات — الإشعارات جاهزة' : 'تم الحفظ، لكن المتصفح رفض صلاحية الإشعارات');
+    } else toast('تم حفظ الإعدادات');
   };
 
   $('#saveTools').onclick = async () => {
@@ -1570,9 +1522,11 @@ function renderAbout() {
       <div class="grid-cards">
         <div class="card"><h3>🔑 مفاتيحك</h3><p>OpenAI، Claude، Gemini، OpenRouter، Groq، DeepSeek، Mistral، xAI، Together، Ollama المحلي، وأي سيرفر متوافق مع OpenAI.</p></div>
         <div class="card"><h3>🎤 متعدد الوسائط</h3><p>أرسل نصًا، تسجيل صوتي، صورًا، فيديو، ملفات و PDF. واستقبل صورًا وردودًا صوتية.</p></div>
-        <div class="card"><h3>🤖 وكلاء بأدوات</h3><p>تنفيذ كود، بحث ويب، جلب صفحات، توليد صور، إنشاء ملفات، وذاكرة دائمة.</p></div>
-        <div class="card"><h3>🧪 معاينة الأكواد</h3><p>كل كود يكتبه النموذج يمكن تشغيله فورًا داخل التطبيق في بيئة معزولة.</p></div>
-        <div class="card"><h3>💾 سجل محلي</h3><p>كل محادثة لها اسم وتُحفظ على جهازك في IndexedDB، مع تصدير واستيراد.</p></div>
+        <div class="card"><h3>🤖 وكلاء بأدوات</h3><p>وكلاء جاهزون + وكلاء تصنعهم بنفسك، ومحادثاتهم منفصلة عن محادثاتك العادية.</p></div>
+        <div class="card"><h3>🔔 يشتغل في الخلفية</h3><p>لو خرجت من التطبيق يكمل الرد ويبعتلك إشعار لما يخلص (على أندرويد إشعار حقيقي).</p></div>
+        <div class="card"><h3>🧩 نماذجك الخاصة</h3><p>أضف أي نموذج بمفتاحه ورابطه واسم الموديل، واضغط «تحقق» ليتأكد أنه يعمل.</p></div>
+        <div class="card"><h3>👁️ معاينة الأكواد داخل الرد</h3><p>تحت أي كود يكتبه الذكاء الاصطناعي تجد زر <b>معاينة الكود</b> — يفتحه ويشغّله فورًا في بيئة معزولة: HTML، CSS، JavaScript، SVG، Markdown، JSON، <b>Python</b>، <b>Lua</b>.</p></div>
+        <div class="card"><h3>📚 المكتبة</h3><p>كل محادثاتك في مكان واحد على جهازك، مع بحث بالاسم أو بمحتوى الرسائل، وفلتر يفصل محادثات الوكلاء عن محادثاتك.</p></div>
         <div class="card"><h3>📴 يعمل كتطبيق</h3><p>${window.MosaaidiNative ? 'أنت تستخدم الآن تطبيق أندرويد (APK) — كل شيء يعمل بدون متصفح.' : 'من المتصفح: القائمة ← «إضافة إلى الشاشة الرئيسية» ليعمل كتطبيق مستقل.'}</p></div>
       </div>
     </div>
@@ -1587,7 +1541,7 @@ function renderAbout() {
         <li>للأكواد: Claude أو DeepSeek أو GPT-4.1.</li>
         <li>للسرعة والرخص: Groq أو GPT-4o-mini.</li>
         <li>فعّل «قراءة الردود صوتيًا» من الإعدادات للاستماع للردود.</li>
-        <li>في صفحة المعاينة: Ctrl+Enter لتشغيل الكود.</li>
+        <li>لتشغيل أي كود: اضغط زر <b>👁️ معاينة الكود</b> تحت الرد — و Ctrl+Enter لإعادة التشغيل بعد التعديل.</li>
       </ul>
     </div>`;
 }
@@ -1607,6 +1561,23 @@ function bindEvents() {
     applyTheme(t);
   };
   $('#convSearch').oninput = debounce((e) => { state.search = e.target.value; renderConversations(); }, 180);
+
+  // بحث المكتبة + الفلاتر
+  const libSearch = $('#libSearch');
+  if (libSearch) {
+    libSearch.value = state.libQuery || '';
+    libSearch.oninput = debounce((e) => { state.libQuery = e.target.value; renderLibrary(); }, 200);
+  }
+  $$('#libFilters .chip').forEach((b) => {
+    b.classList.toggle('active', (state.libFilter || 'all') === b.dataset.filter);
+    b.onclick = () => {
+      state.libFilter = b.dataset.filter;
+      $$('#libFilters .chip').forEach((x) => x.classList.toggle('active', x === b));
+      renderLibrary();
+    };
+  });
+
+  wirePreviewOverlay();
 
   // المُدخَل
   const input = $('#input');
@@ -1683,6 +1654,7 @@ async function boot() {
     state.model = state.settings.defaultModel;
     bindEvents();
     goto('chats');
+    if (state.settings.notifyOnFinish !== false) requestNotifyPermission();
     renderChatHead();
   } catch (e) {
     console.error(e);

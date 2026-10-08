@@ -239,6 +239,7 @@ public class MainActivity extends Activity {
         addIfMissing(need, Manifest.permission.RECORD_AUDIO);
         addIfMissing(need, Manifest.permission.CAMERA);
         if (Build.VERSION.SDK_INT < 29) addIfMissing(need, Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        if (Build.VERSION.SDK_INT >= 33) addIfMissing(need, "android.permission.POST_NOTIFICATIONS");
         if (!need.isEmpty()) {
             try {
                 requestPermissions(need.toArray(new String[0]), REQ_PERMS);
@@ -250,6 +251,25 @@ public class MainActivity extends Activity {
     private void addIfMissing(List<String> list, String perm) {
         try {
             if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) list.add(perm);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** نُبقي الصفحة تعمل في الخلفية حتى يكمل الرد ويصل الإشعار */
+    @Override
+    protected void onPause() {
+        super.onPause();
+        try {
+            if (web != null) web.resumeTimers();
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        try {
+            if (web != null) web.resumeTimers();
         } catch (Exception ignored) {
         }
     }

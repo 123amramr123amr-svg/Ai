@@ -115,20 +115,6 @@ test('smoke: حلقة الوكيل تستدعي أداة الآلة الحاسب
   assert.equal(reply.meta.toolSteps[0].name, 'calculator');
 });
 
-test('smoke: صفحة المعاينة تُنشئ كودًا وتعرضه', async () => {
-  const { Artifacts } = await import('../js/db.js');
-  await Artifacts.add({ title: 'اختبار معاينة', lang: 'html', code: '<h1>مرحبا</h1>', kind: 'web' });
-  app.state.artifacts = await Artifacts.list();
-  app.goto('preview');
-  await new Promise((r) => setTimeout(r, 80));
-  assert.ok(document.querySelector('#pvFrame'), 'إطار المعاينة موجود');
-  assert.ok(document.querySelector('#pvCode').value.includes('مرحبا'), 'الكود محمّل في المحرر');
-  document.querySelector('#runArt').click();
-  await new Promise((r) => setTimeout(r, 40));
-  const frame = document.querySelector('#pvFrame');
-  assert.match(frame.getAttribute('sandbox') || '', /allow-scripts/);
-});
-
 test('smoke: صفحة الإعدادات تعرض كل المزوّدين', async () => {
   app.goto('settings');
   await new Promise((r) => setTimeout(r, 100));
@@ -164,30 +150,6 @@ test('smoke: الأدوات مُفعَّلة تلقائيًا في المحاد�
   assert.equal(body.tool_choice, 'auto');
 });
 
-test('smoke: المعاينة الحيّة تعمل تلقائيًا داخل رد الذكاء الاصطناعي', async () => {
-  globalThis.fetch = async () => sseResponse([
-    { choices: [{ delta: { content: 'اتفضل ده كود:\n\n```html\n<h1 id="x">أهلاً</h1>\n<script>console.log(1)<\/script>\n```\n' }, finish_reason: 'stop' }] },
-  ]);
-  await app.newChat({ title: 'كود تلقائي' });
-  document.querySelector('#input').value = 'اعمل لي صفحة';
-  await app.sendMessage();
-  await new Promise((r) => setTimeout(r, 200));
-
-  const live = document.querySelector('#messages [data-live]');
-  assert.ok(live, 'كتلة المعاينة الحيّة ظهرت تحت الكود');
-  const iframe = live.querySelector('iframe');
-  assert.ok(iframe, 'الإطار أُنشئ تلقائيًا بدون أي ضغط من المستخدم');
-  assert.match(iframe.getAttribute('sandbox') || '', /allow-scripts/);
-  assert.match(iframe.getAttribute('srcdoc') || '', /<h1 id="x">/);
-
-  const { Artifacts } = await import('../js/db.js');
-  const arts = await Artifacts.list();
-  const fromReply = arts.filter((a) => a.auto);
-  assert.ok(fromReply.length >= 1, 'الكود حُفظ تلقائيًا في مكتبة المعاينة');
-  assert.ok(fromReply[0].conversationId, 'مرتبط بالمحادثة');
-  assert.ok(fromReply[0].hash, 'له بصمة لمنع التكرار');
-});
-
 test('smoke: إضافة نموذج خاص (مفتاح + رابط + موديل) والتحقق منه', async () => {
   const P = await import('../js/providers.js');
   const rec = await P.addCustomProvider({
@@ -220,4 +182,94 @@ test('smoke: إضافة نموذج خاص (مفتاح + رابط + موديل) �
 
   await P.removeCustomProvider(rec.id);
   assert.ok(!P.allProviders().some((p) => p.id === rec.id), 'تم الحذف');
+});
+
+test('smoke: زر العين 👁️ تحت الرد يفتح المعاينة ويشغّل الكود', async () => {
+  const code = ['```html', '<h1 id="x">أهلاً</h1>', '<script>console.log(42)</scr' + 'ipt>', '```'].join('\n');
+  globalThis.fetch = async () => sseResponse([
+    { choices: [{ delta: { content: 'اتفضل ده كود:\n\n' + code + '\n' }, finish_reason: 'stop' }] },
+  ]);
+  await app.newChat({ title: 'كود' });
+  document.querySelector('#input').value = 'اعمل لي صفحة';
+  await app.sendMessage();
+  await new Promise((r) => setTimeout(r, 220));
+
+  const eye = document.querySelector('#messages [data-eye]');
+  assert.ok(eye, 'زر العين ظهر تحت الرد');
+  assert.match(eye.textContent, /معاينة/);
+
+  const overlay = document.querySelector('#pvOverlay');
+  assert.equal(overlay.hidden, true, 'المعاينة مقفولة في البداية');
+
+  eye.click();
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(overlay.hidden, false, 'المعاينة اتفتحت بالضغط على العين');
+
+  const frame = document.querySelector('#pvFrame');
+  assert.match(frame.getAttribute('sandbox') || '', /allow-scripts/, 'الإطار معزول');
+  assert.ok((frame.getAttribute('srcdoc') || '').includes('<h1 id="x">'), 'الكود الحقيقي اتحمّل في المعاينة');
+  assert.match(document.querySelector('#pvLangBadge').textContent, /HTML/);
+
+  document.querySelector('#pvClose').click();
+  assert.equal(overlay.hidden, true, 'المعاينة اتقفلت');
+
+  const { Artifacts } = await import('../js/db.js');
+  const arts = await Artifacts.list();
+  assert.ok(arts.some((a) => a.auto), 'الكود اتحفظ في السجل تلقائيًا');
+});
+
+test('smoke: المكتبة تبحث بالاسم وتفصل محادثات الوكلاء', async () => {
+  const { Agents } = await import('../js/db.js');
+  const agent = (await Agents.list())[0];
+
+  await app.createConversation({ title: 'وصفة كشري بالتفصيل' });
+  await app.createConversation({ title: 'شرح بايثون للمبتدئين' });
+  await app.createConversation({ title: 'بحث عن أخبار', agentId: agent.id });
+
+  app.goto('chats');
+  await new Promise((r) => setTimeout(r, 120));
+
+  const search = document.querySelector('#libSearch');
+  assert.ok(search, 'مربع البحث في المكتبة موجود');
+
+  const type = (v) => { search.value = v; search.dispatchEvent(new dom.window.Event('input')); };
+
+  type('كشري');
+  await new Promise((r) => setTimeout(r, 450));
+  let cards = [...document.querySelectorAll('#libList .lib-card')];
+  assert.equal(cards.length, 1, 'نتيجة واحدة للبحث بالاسم');
+  assert.match(cards[0].textContent, /كشري/);
+  assert.ok(cards[0].querySelector('mark'), 'الكلمة المطابقة مُبرزة');
+
+  type('');
+  await new Promise((r) => setTimeout(r, 450));
+  document.querySelector('[data-filter="agent"]').click();
+  await new Promise((r) => setTimeout(r, 80));
+  cards = [...document.querySelectorAll('#libList .lib-card')];
+  assert.ok(cards.some((c) => c.textContent.includes('بحث عن أخبار')), 'محادثة الوكيل ظاهرة في فلتر الوكلاء');
+  assert.ok(!cards.some((c) => c.textContent.includes('كشري')), 'المحادثات العادية مستبعدة من فلتر الوكلاء');
+
+  document.querySelector('[data-filter="all"]').click();
+  await new Promise((r) => setTimeout(r, 80));
+  cards = [...document.querySelectorAll('#libList .lib-card')];
+  assert.ok(cards.length >= 3, 'فلتر «الكل» يعرض كل المحادثات');
+});
+
+test('smoke: لغات البرمجة المدعومة في المعاينة', async () => {
+  const { runtimeOf, isRunnableLang, needsOnline } = await import('../js/runtimes.js');
+  for (const l of ['html', 'css', 'js', 'svg', 'markdown', 'json', 'python', 'lua']) {
+    assert.ok(isRunnableLang(l, ''), 'مدعومة: ' + l);
+  }
+  assert.equal(runtimeOf('python').kind, 'pyodide');
+  assert.equal(runtimeOf('lua').kind, 'fengari');
+  assert.ok(needsOnline('python'));
+  assert.ok(!needsOnline('html'));
+  assert.ok(!isRunnableLang('cobol', ''), 'اللغات غير المدعومة تُرفض');
+
+  const { buildDoc } = await import('../js/preview.js');
+  const py = buildDoc({ lang: 'python', code: 'print("hi")' });
+  assert.match(py, /pyodide/);
+  assert.ok(py.includes('print(\\"hi\\")'), 'كود بايثون مُمرَّر بأمان');
+  const md = buildDoc({ lang: 'markdown', code: '# عنوان' });
+  assert.match(md, /<h1>عنوان<\/h1>/);
 });

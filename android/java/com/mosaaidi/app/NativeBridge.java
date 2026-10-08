@@ -4,6 +4,10 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -131,6 +135,38 @@ public class NativeBridge {
                 }
             }
         });
+    }
+
+    /** إشعار نظام أندرويد (يظهر حتى لو التطبيق في الخلفية أو مقفول) */
+    @JavascriptInterface
+    public void notify(final String title, final String body) {
+        try {
+            final NotificationManager nm = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
+            final String channelId = "mosaaidi_replies";
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(channelId, "ردود المساعد", NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("إشعار عند انتهاء رد الذكاء الاصطناعي");
+                nm.createNotificationChannel(ch);
+            }
+            Intent open = new Intent(activity, MainActivity.class);
+            open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            PendingIntent pi = PendingIntent.getActivity(activity, 0, open,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+            Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                    ? new Notification.Builder(activity, channelId)
+                    : new Notification.Builder(activity);
+            b.setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle(title == null ? "مساعدي" : title)
+                    .setContentText(body == null ? "" : body)
+                    .setStyle(new Notification.BigTextStyle().bigText(body == null ? "" : body))
+                    .setAutoCancel(true)
+                    .setContentIntent(pi);
+            if (Build.VERSION.SDK_INT < 26) b.setPriority(Notification.PRIORITY_HIGH);
+            nm.notify(1001, b.build());
+        } catch (Exception e) {
+            // نتجاهل أي خطأ في الإشعار
+        }
     }
 
     @JavascriptInterface

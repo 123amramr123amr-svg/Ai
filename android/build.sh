@@ -80,7 +80,7 @@ if [ ! -f "$KS" ]; then
 fi
 
 # 9) التوقيع
-APK="$OUT/mosaaidi-v1.1.apk"
+APK="$OUT/mosaaidi-v1.2.apk"
 echo "▸ توقيع الحزمة (apksigner)…"
 "$BT/apksigner" sign --ks "$KS" --ks-pass pass:mosaaidi --key-pass pass:mosaaidi \
   --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \

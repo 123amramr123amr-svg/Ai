@@ -302,3 +302,50 @@ html[dir=rtl] .nav-item.active{box-shadow:inset -3px 0 0 var(--acc)}
 .code-live iframe{width:100%;height:min(46vh,380px);border:1px solid var(--line-2);border-radius:12px;background:#fff;display:block}
 .code-live .pv-log{max-height:104px;margin-top:6px}
 .live-empty{border:1px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;color:var(--txt-faint);font-size:13px}
+
+/* ------------------ المكتبة ------------------ */
+.library-head{background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 14%,var(--panel)),color-mix(in srgb,var(--acc-2) 12%,var(--panel)));border:1px solid var(--line-2);border-radius:20px;padding:20px;margin-bottom:14px}
+.library-head h1{margin:0 0 6px;font-size:clamp(19px,3.6vw,26px)}
+.library-head p{margin:0 0 14px;color:var(--txt-dim);font-size:13.5px}
+.library-actions{display:flex;gap:8px;flex-wrap:wrap}
+.library-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.library-tools input[type=search]{flex:1;min-width:220px;background:var(--bg-3);border:1px solid var(--line);border-radius:12px;padding:11px 14px;outline:none}
+.library-tools input[type=search]:focus{border-color:var(--acc)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--bg-3);border:1px solid var(--line);border-radius:99px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;color:var(--txt-dim)}
+.chip.active{background:linear-gradient(135deg,var(--acc),var(--acc-2));color:#fff;border-color:transparent}
+.library-count{font-size:12px;color:var(--txt-faint)}
+.lib-list{display:flex;flex-direction:column;gap:8px}
+.lib-card{display:flex;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;cursor:pointer;transition:.15s}
+.lib-card:hover{border-color:var(--acc);transform:translateY(-1px)}
+.lib-card .lc-emoji{font-size:22px;width:38px;height:38px;display:grid;place-items:center;background:var(--bg-3);border-radius:11px;flex:0 0 auto}
+.lib-card .lc-main{flex:1;min-width:0}
+.lib-card .lc-title{font-weight:700;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-card .lc-snippet{font-size:12.5px;color:var(--txt-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-card .lc-sub{font-size:11.5px;color:var(--txt-faint);margin-top:2px}
+.lib-card .lc-actions{display:flex;gap:6px;flex-wrap:wrap}
+mark{background:color-mix(in srgb,var(--warn) 45%,transparent);color:inherit;border-radius:4px;padding:0 2px}
+
+/* ------------------ زر المعاينة تحت الرد ------------------ */
+.pv-eye{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;padding:9px 12px;background:color-mix(in srgb,var(--acc) 12%,var(--bg-3));border:1px solid var(--line-2);border-radius:12px}
+.pv-eye .pv-eye-btn{background:linear-gradient(135deg,var(--acc),var(--acc-2));border:0;color:#fff;border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:13.5px;display:inline-flex;align-items:center;gap:6px}
+.pv-eye .pv-eye-btn:hover{filter:brightness(1.08)}
+.pv-eye .pv-eye-hint{font-size:12px;color:var(--txt-dim)}
+
+/* ------------------ نافذة المعاينة المنبثقة ------------------ */
+.pv-overlay{position:fixed;inset:0;background:rgba(4,7,18,.82);z-index:90;display:flex;padding:0}
+.pv-shell{display:flex;flex-direction:column;width:100%;height:100dvh;background:var(--bg);padding-top:var(--safe-t)}
+.pv-head{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--bg-2);flex-wrap:wrap}
+.pv-head strong{font-size:14.5px;max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-head .spacer{flex:1}
+.pv-body{flex:1;display:grid;grid-template-columns:1fr;gap:0;min-height:0}
+.pv-frame-main{width:100%;height:100%;border:0;background:#fff}
+.pv-side{display:flex;flex-direction:column;border-top:1px solid var(--line);background:var(--bg-2);max-height:46%}
+.pv-side .pv-log{margin:8px;max-height:130px;overflow:auto;flex:0 0 auto}
+.pv-side .pv-code{margin:8px;flex:1;min-height:120px;resize:vertical;overflow:auto}
+.pv-overlay.pv-max .pv-side{display:none}
+.pv-overlay.pv-max .pv-body{grid-template-columns:1fr}
+@media (min-width:1000px){
+  .pv-body{grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr)}
+  .pv-side{max-height:none;border-top:0;border-inline-start:1px solid var(--line)}
+}

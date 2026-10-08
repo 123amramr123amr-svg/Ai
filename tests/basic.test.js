@@ -57,13 +57,18 @@ test('markdown: حماية من حقن HTML', () => {
 });
 
 test('markdown: استخراج الأكواد القابلة للتشغيل', () => {
-  const arts = extractArtifacts('```html\n<h1>hi</h1>\n```\n\n```python\nprint(1)\n```');
-  assert.equal(arts.length, 1);
+  const md = ['```html', '<h1>hi</h1>', '```', '', '```python', 'print(1)', '```', '', '```cobol', 'DISPLAY "x"', '```'].join('\n');
+  const arts = extractArtifacts(md);
+  assert.equal(arts.length, 2, 'HTML و Python قابلان للتشغيل');
   assert.equal(arts[0].lang, 'html');
   assert.equal(arts[0].kind, 'web');
+  assert.equal(arts[1].lang, 'python');
   assert.ok(isRunnable('js', ''));
-  assert.ok(!isRunnable('python', 'print(1)'));
+  assert.ok(isRunnable('lua', ''));
+  assert.ok(isRunnable('markdown', ''));
+  assert.ok(!isRunnable('cobol', 'DISPLAY "x"'), 'اللغات غير المدعومة تُستبعد');
   assert.equal(langLabel('js'), 'JavaScript');
+  assert.equal(langLabel('python'), 'Python');
 });
 
 test('providers: تحويل رسالة وسائط إلى صيغة OpenAI', () => {

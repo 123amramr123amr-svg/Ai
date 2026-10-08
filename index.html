@@ -32,15 +32,14 @@
     <button class="new-chat-btn" id="newChatBtn">＋ محادثة جديدة</button>
 
     <nav class="nav">
-      <button class="nav-item" data-goto="chats">💬 المحادثات</button>
+      <button class="nav-item" data-goto="chats">📚 المكتبة</button>
       <button class="nav-item" data-goto="agents">🤖 الوكلاء (Agents)</button>
-      <button class="nav-item" data-goto="preview">🧪 المعاينة (Preview)</button>
       <button class="nav-item" data-goto="settings">⚙️ الإعدادات والمفاتيح</button>
       <button class="nav-item" data-goto="about">ℹ️ عن التطبيق</button>
     </nav>
 
     <div class="sidebar-search">
-      <input type="search" id="convSearch" placeholder="ابحث في المحادثات…" />
+      <input type="search" id="convSearch" placeholder="ابحث في المكتبة…" />
     </div>
     <div class="conv-list" id="convList" role="list"></div>
 
@@ -61,16 +60,26 @@
     </header>
 
     <section class="view" id="view-chats">
-      <div class="hero">
-        <h1>ابدأ محادثة جديدة</h1>
-        <p>أضف مفتاح مزوّد واحد على الأقل من الإعدادات، ثم تحدّث بالنص أو الصوت، وأرسل صورًا وفيديو وملفات.</p>
-        <div class="hero-actions">
+      <div class="library-head">
+        <h1>📚 المكتبة</h1>
+        <p>كل محادثاتك محفوظة هنا على جهازك — ابحث بالاسم أو بمحتوى الرسائل.</p>
+        <div class="library-actions">
           <button class="btn primary" data-new-chat>＋ محادثة جديدة</button>
-          <button class="btn" data-goto="settings">🔑 إضافة مفتاح API</button>
-          <button class="btn" data-goto="preview">🧪 صفحة المعاينة</button>
+          <button class="btn" data-goto="agents">🤖 الوكلاء</button>
+          <button class="btn" data-goto="settings">🔑 المفاتيح</button>
         </div>
       </div>
-      <div class="grid-cards" id="quickCards"></div>
+      <div class="library-tools">
+        <input type="search" id="libSearch" placeholder="🔍 ابحث باسم المحادثة أو بكلمة في الرسائل…" />
+        <div class="chips" id="libFilters">
+          <button class="chip active" data-filter="all">الكل</button>
+          <button class="chip" data-filter="chat">💬 محادثاتي</button>
+          <button class="chip" data-filter="agent">🤖 الوكلاء</button>
+        </div>
+        <div class="library-count" id="libCount"></div>
+      </div>
+      <div class="lib-list" id="libList"></div>
+      <div class="grid-cards" id="quickCards" style="margin-top:18px"></div>
     </section>
 
     <section class="view" id="view-chat" hidden>
@@ -94,10 +103,33 @@
     </section>
 
     <section class="view" id="view-agents" hidden></section>
-    <section class="view" id="view-preview" hidden></section>
     <section class="view" id="view-settings" hidden></section>
     <section class="view" id="view-about" hidden></section>
   </main>
+</div>
+
+<!-- المعاينة المنبثقة (تفتح من علامة العين تحت أي كود) -->
+<div id="pvOverlay" class="pv-overlay" hidden>
+  <div class="pv-shell">
+    <div class="pv-head">
+      <button class="icon-btn" id="pvClose" title="إغلاق">✕</button>
+      <strong id="pvTitle">معاينة الكود</strong>
+      <span class="badge" id="pvLangBadge">—</span>
+      <span class="spacer"></span>
+      <button class="btn sm ok" id="pvRun">🔄 تشغيل</button>
+      <button class="btn sm" id="pvStop">⏹</button>
+      <button class="btn sm" id="pvCopy">📋 نسخ</button>
+      <button class="btn sm" id="pvDl">⬇️ تنزيل</button>
+      <button class="btn sm" id="pvFull">⛶ ملء</button>
+    </div>
+    <div class="pv-body" id="pvBody">
+      <iframe id="pvFrame" class="pv-frame-main" title="معاينة الكود"></iframe>
+      <div class="pv-side">
+        <div class="pv-log" id="pvLog">سجل التشغيل سيظهر هنا…</div>
+        <textarea class="pv-code" id="pvCodeEdit" spellcheck="false" title="يمكنك تعديل الكود وإعادة التشغيل"></textarea>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast" hidden></div>

@@ -96,7 +96,7 @@ export const TOOL_DEFS = [
   {
     name: 'create_preview',
     label: 'إنشاء كود للمعاينة',
-    description: 'يحفظ كودًا (HTML/CSS/JS) في صفحة المعاينة ليشغّله المستخدم فورًا. استخدمه دائمًا عند كتابة واجهة أو لعبة أو تطبيق ويب.',
+    description: 'يسجّل كودًا كتبته في السجل. المستخدم سيجد زر معاينة 👁️ تحت ردّك يشغّل الكود فورًا. استخدمه عند كتابة واجهة أو لعبة أو تطبيق ويب.',
     parameters: {
       type: 'object',
       properties: {
@@ -220,7 +220,7 @@ export async function executeTool(name, args = {}, ctx = {}) {
         });
         ctx.onArtifact?.(art);
         step(`أُنشئ مشروع «${art.title}» (${lang})`);
-        return `تم حفظ الكود في صفحة المعاينة باسم "${art.title}". المستخدم يمكنه تشغيله الآن من تبويب 🧪 المعاينة.`;
+        return `تم تسجيل الكود باسم "${art.title}". المستخدم سيجد زر 👁️ معاينة الكود تحت ردّك ويستطيع تشغيله فورًا.`;
       }
 
       case 'generate_image': {

@@ -1,6 +1,7 @@
 /* markdown.js — عارض ماركداون خفيف وآمن (بدون مكتبات خارجية) */
 
 import { esc } from './util.js';
+import { runtimeOf, isRunnableLang, runtimeLabel } from './runtimes.js';
 
 const LANG_LABELS = {
   html: 'HTML', xml: 'XML', svg: 'SVG', css: 'CSS', js: 'JavaScript', javascript: 'JavaScript',
@@ -9,19 +10,16 @@ const LANG_LABELS = {
   sql: 'SQL', java: 'Java', c: 'C', cpp: 'C++', cs: 'C#', go: 'Go', rs: 'Rust', php: 'PHP', dart: 'Dart',
 };
 
-export const langLabel = (l) => LANG_LABELS[(l || '').toLowerCase()] || (l || 'نص');
+export const langLabel = (l, code = '') => runtimeLabel(l, code) || LANG_LABELS[(l || '').toLowerCase()] || (l || 'نص');
 
 /* هل يمكن تشغيل هذا الكود في صفحة المعاينة؟ */
 export function isRunnable(lang, code = '') {
-  const l = (lang || '').toLowerCase();
-  if (['html', 'htm', 'svg', 'xml', 'css', 'js', 'javascript', 'mjs', 'jsx'].includes(l)) return true;
-  if (!l && /<\s*(!doctype|html|body|div|canvas|svg|script)/i.test(code)) return true;
-  return false;
+  return isRunnableLang(lang, code);
 }
 
 export function isWebProject(lang, code = '') {
-  const l = (lang || '').toLowerCase();
-  return ['html', 'htm', 'svg', 'xml', 'css'].includes(l) || (!l && /<\s*(!doctype|html)/i.test(code));
+  const rt = runtimeOf(lang, code);
+  return rt?.kind === 'web';
 }
 
 /* استخراج الأكواد القابلة للتشغيل من نص ردّ النموذج */
