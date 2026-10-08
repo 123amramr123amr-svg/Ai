@@ -2,8 +2,8 @@
 
 import * as DB from './db.js';
 import { Settings, Conversations, Messages, Assets, Artifacts, Agents, storageEstimate, askPersistent } from './db.js';
-import { PROVIDERS, getProvider, getConnection, listModels, testConnection, availableProviders, chat, transcribe } from './providers.js';
-import { fileToAttachment, attachmentDataUrl, VoiceRecorder, speak, stopSpeaking, ttsSupported } from './media.js';
+import { PROVIDERS, getProvider, getConnection, getKeys, listModels, testConnection, availableProviders, chat, transcribe } from './providers.js';
+import { fileToAttachment, attachmentDataUrl, attachmentBlob, VoiceRecorder, speak, stopSpeaking, ttsSupported } from './media.js';
 import { renderMarkdown, extractArtifacts, langLabel } from './markdown.js';
 import { TOOL_DEFS, TOOL_LIST, runAgentLoop } from './tools.js';
 import { runInFrame, stopFrame, attachRunner, artifactToHtmlFile, artifactFileName } from './preview.js';
@@ -524,6 +524,30 @@ function systemFor(agent) {
   return base + memBlock;
 }
 
+/* تحويل المقاطع الصوتية إلى نص للنماذج التي لا تفهم الصوت مباشرة (Whisper) */
+async function transcribeAudioAttachments() {
+  const caps = getProvider(state.providerId)?.caps || {};
+  if (caps.audioIn) return;
+  const audios = state.attachments.filter((a) => a.kind === 'audio' && !a.text);
+  if (!audios.length) return;
+  const keys = await getKeys();
+  const sttProvider = ['openai', 'groq'].find((id) => keys[id]);
+  if (!sttProvider) {
+    toast('النموذج المختار لا يفهم الصوت — أضف مفتاح OpenAI أو Groq لتحويله لنص', 6000);
+    return;
+  }
+  for (const a of audios) {
+    try {
+      toast('جارٍ تحويل الصوت إلى نص…');
+      const blob = await attachmentBlob(a);
+      if (!blob) continue;
+      const { text } = await transcribe({ providerId: sttProvider, blob, filename: a.name || 'voice.webm' });
+      a.text = `(نص التسجيل الصوتي) ${text}`;
+      a.transcribed = true;
+    } catch (e) { toast('تعذّر تحويل الصوت: ' + e.message, 5000); }
+  }
+}
+
 export async function sendMessage() {
   if (state.streaming) { toast('انتظر انتهاء الرد الحالي'); return; }
   const input = $('#input');
@@ -540,6 +564,7 @@ export async function sendMessage() {
   for (const a of state.attachments) {
     if (!a.dataUrl && a.assetId) await attachmentDataUrl(a);
   }
+  await transcribeAudioAttachments();
   const parts = [];
   if (text) parts.push({ type: 'text', text });
   parts.push(...partsFromAttachments());
