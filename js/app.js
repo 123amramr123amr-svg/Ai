@@ -321,7 +321,10 @@ function updateHint() {
   if (caps.vision) bits.push('صور ✅'); else bits.push('صور ❌');
   if (caps.audioIn) bits.push('صوت ✅'); else bits.push('صوت ❌');
   if (caps.video) bits.push('فيديو ✅'); else bits.push('فيديو ❌');
-  el.textContent = p ? `${p.emoji} ${p.label} — ${bits.join(' • ')}` : '';
+  const agent = state.current?.agentId ? state.agents.find((a) => a.id === state.current.agentId) : null;
+  const toolNames = agent?.tools?.length ? agent.tools : (state.settings.agentsEnabled !== false ? defaultTools(state.providerId).map((t) => t.name) : []);
+  const toolBit = toolNames.length ? ` • 🛠 ${toolNames.length} أداة${agent ? ' (وكيل: ' + agent.name + ')' : ''}` : '';
+  el.textContent = p ? `${p.emoji} ${p.label} — ${bits.join(' • ')}${toolBit}` : '';
 }
 
 /* ============================ عرض الرسائل ============================ */
@@ -329,10 +332,12 @@ const codeRegistry = new Map(); // key -> {lang, code}
 
 function partHtml(p, msgId) {
   if (p.type === 'text') return '';
+  const chip = `<span class="file-chip" data-asset="${p.assetId || ''}" data-name="${esc(p.name || 'ملف')}">${p.icon || '📎'} ${esc(p.name || 'ملف')} <small>${bytes(p.size)}</small></span>`;
+  if (!p.dataUrl) return chip; // ملفات كبيرة: تُعرض كزر تحميل بدل معاينة مباشرة
   if (p.type === 'image') return `<div><img class="md-img" src="${p.dataUrl}" alt="${esc(p.name || '')}" loading="lazy" /></div>`;
   if (p.type === 'video') return `<div><video controls preload="metadata" src="${p.dataUrl}"></video></div>`;
   if (p.type === 'audio') return `<div><audio controls src="${p.dataUrl}"></audio></div>`;
-  return `<span class="file-chip">${p.icon || '📎'} ${esc(p.name || 'ملف')} <small>${bytes(p.size)}</small></span>`;
+  return chip;
 }
 
 function messageBodyHtml(m) {
@@ -512,6 +517,16 @@ function buildApiHistory(extraSystem) {
   }));
 }
 
+/* الأدوات التي تُتاح تلقائيًا لأي نموذج (وضع الوكلاء العام) */
+function defaultTools(providerId) {
+  const names = ['run_javascript', 'calculator', 'current_datetime', 'create_preview', 'read_file', 'write_file', 'remember', 'recall'];
+  const caps = getProvider(providerId)?.caps || {};
+  if (caps.imageGen) names.push('generate_image');
+  const sk = state.settings.searchKeys || {};
+  if (sk.tavily || sk.brave || state.settings.fetchProxy) { names.push('web_search', 'fetch_url'); }
+  return names.map((n) => TOOL_DEFS.find((t) => t.name === n)).filter(Boolean);
+}
+
 function agentFor(conv) {
   if (!conv?.agentId) return null;
   return state.agents.find((a) => a.id === conv.agentId) || null;
@@ -621,7 +636,9 @@ async function runTurn({ providerId, model, agent }) {
   state.toolSteps = [];
   renderToolLog();
 
-  const tools = agent?.tools?.length ? agent.tools.map((n) => TOOL_DEFS.find((t) => t.name === n)).filter(Boolean) : [];
+  const tools = agent?.tools?.length
+    ? agent.tools.map((n) => TOOL_DEFS.find((t) => t.name === n)).filter(Boolean)
+    : (state.settings.agentsEnabled !== false ? defaultTools(providerId) : []);
   const system = systemFor(agent);
   const history = buildApiHistory();
   const images = [];
@@ -1059,6 +1076,7 @@ async function renderSettings() {
       </div>
       <div class="field"><label>تعليمات النظام (System Prompt) الافتراضية</label><textarea id="sysPrompt" rows="4">${esc(state.settings.systemPrompt)}</textarea></div>
       <label class="switch"><input type="checkbox" id="autoTitle" ${state.settings.autoTitle ? 'checked' : ''} /> تسمية المحادثات تلقائيًا من أول رسالة</label>
+      <label class="switch"><input type="checkbox" id="agentsEnabled" ${state.settings.agentsEnabled !== false ? 'checked' : ''} /> 🛠 تمكين أدوات الوكلاء تلقائيًا لكل النماذج (تنفيذ كود، بحث، توليد صور، ملفات، ذاكرة)</label>
       <label class="switch"><input type="checkbox" id="speakReplies" ${state.settings.speakReplies ? 'checked' : ''} /> قراءة الردود صوتيًا تلقائيًا</label>
       <label class="switch"><input type="checkbox" id="darkMode" ${state.settings.theme !== 'light' ? 'checked' : ''} /> الوضع الليلي</label>
       <button class="btn primary" id="saveDefaults" style="margin-top:12px">💾 حفظ الإعدادات</button>
@@ -1131,6 +1149,7 @@ async function renderSettings() {
       systemPrompt: $('#sysPrompt').value,
       autoTitle: $('#autoTitle').checked,
       speakReplies: $('#speakReplies').checked,
+      agentsEnabled: $('#agentsEnabled').checked,
       theme: $('#darkMode').checked ? 'dark' : 'light',
     });
     state.settings = { ...state.settings, ...(await Settings.all()) };

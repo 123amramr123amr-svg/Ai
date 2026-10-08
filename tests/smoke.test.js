@@ -145,3 +145,21 @@ test('smoke: خطأ المفتاح يُعرض كرسالة واضحة', async ()
     (e) => /401/.test(e.message) && /المفتاح/.test(e.message)
   );
 });
+
+test('smoke: الأدوات مُفعَّلة تلقائيًا في المحادثة العادية', async () => {
+  let body = null;
+  globalThis.fetch = async (_u, opts) => {
+    body = JSON.parse(opts.body);
+    return sseResponse([{ choices: [{ delta: { content: 'تمام' }, finish_reason: 'stop' }] }]);
+  };
+  await app.newChat({ title: 'أدوات' });
+  document.querySelector('#input').value = 'شغّل كود يطبع 1+1';
+  await app.sendMessage();
+  await new Promise((r) => setTimeout(r, 120));
+
+  assert.ok(Array.isArray(body.tools), 'الأدوات أُرسلت للنموذج');
+  const names = body.tools.map((t) => t.function.name);
+  assert.ok(names.includes('run_javascript'), 'أداة تنفيذ الكود متاحة: ' + names.join(','));
+  assert.ok(names.includes('create_preview'), 'أداة المعاينة متاحة');
+  assert.equal(body.tool_choice, 'auto');
+});
