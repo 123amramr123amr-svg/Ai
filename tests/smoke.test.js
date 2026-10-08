@@ -273,3 +273,23 @@ test('smoke: لغات البرمجة المدعومة في المعاينة', as
   const md = buildDoc({ lang: 'markdown', code: '# عنوان' });
   assert.match(md, /<h1>عنوان<\/h1>/);
 });
+
+test('smoke: صفحة الوكلاء وصفحة «عن التطبيق» تعملان', async () => {
+  app.goto('agents');
+  await new Promise((r) => setTimeout(r, 120));
+  assert.ok(document.querySelectorAll('#agentList .list-item').length >= 1, 'الوكلاء معروضون');
+  assert.ok(document.querySelector('#addAgent'), 'زر إضافة وكيل موجود');
+  assert.ok(document.querySelector('#resetAgents'), 'زر استعادة الوكلاء الجاهزين موجود');
+
+  document.querySelector('#addAgent').click();
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(document.querySelector('#modal').hidden, false, 'نافذة إنشاء وكيل تفتح');
+  assert.ok(document.querySelector('#agTools'), 'أدوات الوكيل معروضة');
+  document.querySelector('#modalClose').click();
+
+  app.goto('about');
+  await new Promise((r) => setTimeout(r, 80));
+  const about = document.querySelector('#view-about').innerHTML;
+  assert.ok(about.includes('المكتبة'), 'صفحة «عن التطبيق» تعمل');
+  assert.ok(about.includes('Python'), 'تذكر اللغات المدعومة');
+});
