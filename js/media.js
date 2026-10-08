@@ -1,7 +1,7 @@
 /* media.js — استقبال الملفات والوسائط، ضغط الصور، التسجيل الصوتي */
 
 import { Assets } from './db.js';
-import { blobToDataURL, isTextLike, fileIcon, uid } from './util.js';
+import { blobToDataURL, isTextLike, fileIcon, uid, nativeApp } from './util.js';
 
 export const MAX_TEXT_READ = 400 * 1024;      // أقصى حجم لقراءة ملف كنص
 export const MAX_INLINE = 18 * 1024 * 1024;   // أقصى حجم للإرسال كـ base64
@@ -137,9 +137,17 @@ export class VoiceRecorder {
 }
 
 /* هل يمكن تشغيل الصوت؟ (تحويل النص إلى كلام) */
-export const ttsSupported = () => 'speechSynthesis' in window;
+export const ttsSupported = () => {
+  const n = nativeApp();
+  if (n && typeof n.speak === 'function') return true;
+  return typeof window !== 'undefined' && 'speechSynthesis' in window;
+};
 
 export function speak(text, { lang = 'ar-SA', rate = 1, onEnd } = {}) {
+  const native = nativeApp();
+  if (native && typeof native.speak === 'function') {
+    try { native.speak(String(text)); if (onEnd) setTimeout(onEnd, 1200); return null; } catch { /* نتابع */ }
+  }
   if (!ttsSupported()) throw new Error('قراءة النص غير مدعومة في هذا المتصفح');
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(String(text).slice(0, 4000));
@@ -152,4 +160,8 @@ export function speak(text, { lang = 'ar-SA', rate = 1, onEnd } = {}) {
   return u;
 }
 
-export function stopSpeaking() { if (ttsSupported()) speechSynthesis.cancel(); }
+export function stopSpeaking() {
+  const n = nativeApp();
+  if (n && typeof n.stopSpeaking === 'function') { try { n.stopSpeaking(); } catch {} }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) speechSynthesis.cancel();
+}

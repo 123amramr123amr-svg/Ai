@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.speech.tts.TextToSpeech;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
@@ -17,6 +18,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.Locale;
 
 /** جسر بين صفحة الويب وتطبيق أندرويد (حفظ الملفات، النسخ، المشاركة، الإشعارات) */
 public class NativeBridge {
@@ -47,6 +49,72 @@ public class NativeBridge {
                 Toast.makeText(activity, msg == null ? "" : msg, Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+
+    /** قراءة نص بصوت نظام أندرويد (WebView لا يدعم speechSynthesis) */
+    @JavascriptInterface
+    public void speak(final String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (tts == null) {
+                        tts = new TextToSpeech(activity, new TextToSpeech.OnInitListener() {
+                            @Override
+                            public void onInit(int status) {
+                                if (status == TextToSpeech.SUCCESS) {
+                                    try {
+                                        int r = tts.setLanguage(new Locale("ar"));
+                                        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                                            tts.setLanguage(Locale.getDefault());
+                                        }
+                                        ttsReady = true;
+                                        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mosaaidi");
+                                    } catch (Exception e) {
+                                        Toast.makeText(activity, "تعذّرت القراءة الصوتية", Toast.LENGTH_SHORT).show();
+                                    }
+                                } else {
+                                    Toast.makeText(activity, "تعذّرت القراءة الصوتية على هذا الجهاز", Toast.LENGTH_SHORT).show();
+                                }
+                            }
+                        });
+                    } else if (ttsReady) {
+                        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "mosaaidi");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(activity, "تعذّرت القراءة الصوتية", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void stopSpeaking() {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (tts != null) tts.stop();
+                } catch (Exception ignored) {
+                }
+            }
+        });
+    }
+
+    /** يُستدعى عند إغلاق التطبيق */
+    public void shutdown() {
+        try {
+            if (tts != null) {
+                tts.stop();
+                tts.shutdown();
+                tts = null;
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @JavascriptInterface

@@ -39,6 +39,7 @@ public class MainActivity extends Activity {
     private LocalServer server;
     private ValueCallback<Uri[]> fileCallback;
     private Uri cameraOutputUri;
+    private NativeBridge bridge;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -129,7 +130,8 @@ public class MainActivity extends Activity {
             }
         });
 
-        web.addJavascriptInterface(new NativeBridge(this, web), "MosaaidiNative");
+        bridge = new NativeBridge(this, web);
+        web.addJavascriptInterface(bridge, "MosaaidiNative");
 
         root.addView(web, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -263,6 +265,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            if (bridge != null) bridge.shutdown();
+        } catch (Exception ignored) {
+        }
         try {
             if (server != null) server.stop();
         } catch (Exception ignored) {

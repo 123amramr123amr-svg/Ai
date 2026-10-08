@@ -1363,7 +1363,8 @@ async function boot() {
     console.error(e);
     toast('حدث خطأ أثناء التشغيل: ' + e.message, 6000);
   }
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  // WebView في أندرويد لا يدعم Service Worker — نتجاوزه بأمان
+  if (!window.MosaaidiNative && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 }
