@@ -62,16 +62,52 @@ export function b64ToBlob(b64, mime = 'application/octet-stream') {
   return new Blob([arr], { type: mime });
 }
 
-export function download(filename, content, mime = 'text/plain;charset=utf-8') {
+/* هل نعمل داخل تطبيق أندرويد (APK)؟ */
+export const nativeApp = () => (typeof window !== 'undefined' && window.MosaaidiNative) ? window.MosaaidiNative : null;
+
+/* تحويل نص (يدعم العربية) إلى base64 */
+export function textToBase64(str) {
+  const bytes = new TextEncoder().encode(String(str));
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+async function blobToBase64(blob) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) bin += String.fromCharCode.apply(null, buf.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+/* تنزيل/حفظ ملف — يستخدم جسر أندرويد إن وُجد، وإلا التنزيل من المتصفح */
+export async function download(filename, content, mime = 'text/plain;charset=utf-8') {
+  const native = nativeApp();
+  if (native && typeof native.saveFile === 'function') {
+    try {
+      if (content instanceof Blob) {
+        native.saveFile(filename, await blobToBase64(content), content.type || mime);
+      } else {
+        native.saveFile(filename, textToBase64(content), mime);
+      }
+      return true;
+    } catch (e) { /* نتابع بالطريقة العادية */ }
+  }
   const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return true;
 }
 
 export function copyText(text) {
+  const native = nativeApp();
+  if (native && typeof native.copyText === 'function') {
+    try { native.copyText(String(text)); return Promise.resolve(); } catch { /* نتابع */ }
+  }
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const ta = document.createElement('textarea');
   ta.value = text; document.body.appendChild(ta); ta.select();

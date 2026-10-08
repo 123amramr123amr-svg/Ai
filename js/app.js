@@ -1249,7 +1249,7 @@ function renderAbout() {
         <div class="card"><h3>🤖 وكلاء بأدوات</h3><p>تنفيذ كود، بحث ويب، جلب صفحات، توليد صور، إنشاء ملفات، وذاكرة دائمة.</p></div>
         <div class="card"><h3>🧪 معاينة الأكواد</h3><p>كل كود يكتبه النموذج يمكن تشغيله فورًا داخل التطبيق في بيئة معزولة.</p></div>
         <div class="card"><h3>💾 سجل محلي</h3><p>كل محادثة لها اسم وتُحفظ على جهازك في IndexedDB، مع تصدير واستيراد.</p></div>
-        <div class="card"><h3>📴 يعمل كتطبيق</h3><p>من المتصفح: القائمة ← «إضافة إلى الشاشة الرئيسية» ليعمل كتطبيق مستقل.</p></div>
+        <div class="card"><h3>📴 يعمل كتطبيق</h3><p>${window.MosaaidiNative ? 'أنت تستخدم الآن تطبيق أندرويد (APK) — كل شيء يعمل بدون متصفح.' : 'من المتصفح: القائمة ← «إضافة إلى الشاشة الرئيسية» ليعمل كتطبيق مستقل.'}</p></div>
       </div>
     </div>
     <div class="section">
@@ -1349,6 +1349,7 @@ function bindEvents() {
 /* ============================ بدء التشغيل ============================ */
 async function boot() {
   try {
+    if (window.MosaaidiNative) document.documentElement.dataset.platform = 'android';
     await loadSettings();
     await seedAgents();
     await loadConversations();
