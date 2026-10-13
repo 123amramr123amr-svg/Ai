@@ -54,6 +54,9 @@
       return new TextDecoder().decode(bytes);
     },
     download: function (name, text) {
+      if (window.__nativeSave) {
+        try { window.__nativeSave(name, Util.b64enc(text)); return; } catch (e) {}
+      }
       var blob = new Blob([text], { type: 'application/json' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = name;

@@ -1,4 +1,3 @@
 .tools/
-node_modules/
-*.apk
 build/
+node_modules/
