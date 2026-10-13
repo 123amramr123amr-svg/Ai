@@ -92,16 +92,27 @@
     }
   };
 
+  function allTools() {
+    var map = {};
+    Object.keys(DEFS).forEach(function (k) { map[k] = DEFS[k]; });
+    if (App.Integrations && App.Integrations.tools) {
+      App.Integrations.tools().forEach(function (t) { map[t.name] = t; });
+    }
+    return map;
+  }
+
   App.Tools = {
     DEFS: DEFS,
-    list: function () { return Object.keys(DEFS); },
+    all: allTools,
+    list: function () { return Object.keys(allTools()); },
     schema: function (names) {
-      return (names || []).filter(function (n) { return DEFS[n]; }).map(function (n) {
-        return { name: n, description: DEFS[n].desc, parameters: DEFS[n].parameters };
+      var all = allTools();
+      return (names || []).filter(function (n) { return all[n]; }).map(function (n) {
+        return { name: n, description: all[n].desc, parameters: all[n].parameters };
       });
     },
     run: function (name, args, ctx) {
-      var d = DEFS[name];
+      var d = allTools()[name];
       if (!d) return Promise.resolve('أداة غير معروفة: ' + name);
       return new Promise(function (resolve) {
         try {

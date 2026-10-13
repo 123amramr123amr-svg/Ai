@@ -172,7 +172,31 @@ function mockFetch(url, init) {
   ok('ظهرت خطوة الأداة', /calculator/.test($('#chatMessages').textContent));
   ok('زر الإرسال رجع متاحًا', !$('#btnSend').disabled);
 
-  console.log('\n[9] الأخطاء');
+  console.log('\n[9] التكاملات');
+  UI.tab('integrations');
+  ok('تبويب التكاملات يظهر', !doc.querySelector('#view-integrations').hasAttribute('hidden'));
+  ok('بطاقات GitHub وتليجرام و Webhook موجودة', !!$('#ghToken') && !!$('#tgToken') && !!$('#whUrl'));
+  ok('لا أدوات تكامل قبل الربط', App.Tools.list().indexOf('gh_create_repo') < 0);
+
+  win.fetch = (u) => {
+    if (/api\.github\.com\/user$/.test(u)) return Promise.resolve(jsonResponse({ login: 'tester', name: 'T', public_repos: 3 }));
+    return Promise.resolve(jsonResponse({ message: 'not found' }, 404));
+  };
+  $('#ghToken').value = 'ghp_test';
+  $('#ghOwner').value = 'tester';
+  $('#ghSave').click();
+  await sleep(700);
+  ok('ربط GitHub نجح', App.Integrations.cfg('github').enabled === true, JSON.stringify(App.Integrations.cfg('github')));
+  ok('أدوات GitHub أصبحت متاحة للوكلاء', App.Tools.list().indexOf('gh_create_repo') >= 0, App.Tools.list().join(','));
+  ok('مخطط الأداة صالح للإرسال للنموذج', App.Tools.schema(['gh_create_repo'])[0].name === 'gh_create_repo');
+
+  $('#whUrl').value = 'https://example.com/hook';
+  $('#whSave').click();
+  await sleep(200);
+  ok('Webhook مفعّل', App.Integrations.cfg('webhook').enabled === true);
+  ok('أداة send_webhook متاحة', App.Tools.list().indexOf('send_webhook') >= 0);
+
+  console.log('\n[10] الأخطاء');
   ok('لا أخطاء JS خلال كل السيناريوهات', pageErrors.length === 0, pageErrors.join(' | '));
 
   console.log('\n' + (fail === 0 ? '🎉 كل اختبارات الواجهة نجحت (' + pass + ')' : '⚠ فشل ' + fail + ' من ' + (pass + fail)));

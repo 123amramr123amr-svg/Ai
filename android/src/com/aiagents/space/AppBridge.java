@@ -1,6 +1,8 @@
 package com.aiagents.space;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.os.Build;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
@@ -22,6 +24,20 @@ public class AppBridge {
                 Toast.makeText(act, msg, Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    /** يُبقي التطبيق يعمل في الخلفية (لاستقبال تليجرام). */
+    @JavascriptInterface
+    public void keepAlive(final boolean on) {
+        try {
+            Intent i = new Intent(act, AgentService.class);
+            if (on) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) act.startForegroundService(i);
+                else act.startService(i);
+            } else {
+                act.stopService(i);
+            }
+        } catch (Throwable ignored) { }
     }
 
     @JavascriptInterface

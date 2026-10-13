@@ -120,6 +120,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
     (await page.evaluate(() => document.getElementById('customResult').textContent)).slice(0, 150));
   await page.screenshot({ path: OUT + '/08-live-test.png' });
 
+  await page.evaluate(() => { App.UI.tab('integrations'); });
+  await sleep(500);
+  await page.screenshot({ path: OUT + '/10-integrations.png' });
+
+  await page.evaluate(() => { App.UI.tab('agents'); App.UI.chatList && null; });
+
   await page.evaluate(() => {
     document.documentElement.setAttribute('data-theme', 'light');
     App.UI.tab('providers');

@@ -90,6 +90,7 @@
     if (name === 'agents') UI.renderAgents();
     if (name === 'chat') UI.renderChat();
     if (name === 'settings') UI.renderSettings();
+    if (name === 'integrations') UI.renderIntegrations();
     UI.scrollBottom();
   };
 
@@ -247,8 +248,9 @@
       return '<option value="' + i + '">' + t.emoji + ' ' + U.esc(t.name) + '</option>';
     }).join('');
 
+    var allToolDefs = App.Tools.all();
     var toolChks = App.Tools.list().map(function (n) {
-      var d = App.Tools.DEFS[n];
+      var d = allToolDefs[n];
       var on = (cfg.tools || []).indexOf(n) >= 0;
       return '<label class="chk"><input type="checkbox" value="' + n + '"' + (on ? ' checked' : '') + '>' +
         '<b>' + U.esc(d.label) + '</b> — <span class="small">' + U.esc(d.desc) + '</span></label>';
@@ -491,6 +493,152 @@
     U.$('#btnSend').disabled = false;
     U.$('#btnStop').hidden = true;
     UI.renderMessages();
+  };
+
+  UI.renderIntegrations = function () {
+    var box = U.$('#integrationsBox');
+    if (!box) return;
+    var IG = App.Integrations;
+    var g = IG.cfg('github'), t = IG.cfg('telegram'), w = IG.cfg('webhook');
+
+    var ghCard =
+      '<div class="card">' +
+      '<h3 class="sect-title">01 — GitHub</h3>' +
+      '<p class="muted small">اربط حسابك ليقدر الوكيل ينشئ مستودعات ويكتب الملفات ويفتح مهام — يعني يبني مشاريع كاملة.</p>' +
+      '<label class="fld"><span>التوكن (Personal Access Token)</span>' +
+      '<input class="ltr" id="ghToken" type="password" placeholder="ghp_..." value="' + U.esc(g.token) + '"></label>' +
+      '<div class="grid2">' +
+      '<label class="fld"><span>الحساب / المؤسسة</span><input class="ltr" id="ghOwner" value="' + U.esc(g.owner) + '"></label>' +
+      '<label class="fld"><span>المستودع الافتراضي</span><input class="ltr" id="ghRepo" value="' + U.esc(g.defaultRepo) + '"></label>' +
+      '</div>' +
+      '<div class="row"><button class="btn primary" id="ghSave">تحقّق وحفظ</button>' +
+      '<button class="btn danger" id="ghOff">فصل</button></div>' +
+      '<div id="ghStatus" class="hint ' + (g.enabled ? 'ok' : '') + '">' +
+      (g.enabled ? ('مربوط بحساب ' + U.esc(g.user || g.owner)) : 'غير مربوط') + '</div>' +
+      '<p class="muted small">أنشئ توكن من <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">github.com/settings/tokens</a> — يكفي صلاحية <b>repo</b>.</p>' +
+      '</div>';
+
+    var agentOpts = '<option value="">— اختر وكيلًا —</option>' + App.Agent.list().map(function (a) {
+      return '<option value="' + a.id + '"' + (a.id === t.agentId ? ' selected' : '') + '>' +
+        U.esc(a.name) + '</option>';
+    }).join('');
+
+    var tgCard =
+      '<div class="card">' +
+      '<h3 class="sect-title">02 — تليجرام</h3>' +
+      '<p class="muted small">أنشئ بوت من <b>@BotFather</b> والصق التوكن، واختر الوكيل الذي سيرد على رسائلك.</p>' +
+      '<label class="fld"><span>توكن البوت</span>' +
+      '<input class="ltr" id="tgToken" type="password" placeholder="123456:ABC-DEF..." value="' + U.esc(t.token) + '"></label>' +
+      '<div class="row"><button class="btn" id="tgVerify">تحقّق من البوت</button>' +
+      '<span class="hint" id="tgBot">' + (t.botName ? ('@' + U.esc(t.botName)) : '') + '</span></div>' +
+      '<label class="fld"><span>الوكيل الذي يرد</span><select id="tgAgent">' + agentOpts + '</select></label>' +
+      '<div class="row"><button class="btn primary" id="tgStart">تشغيل الاستقبال</button>' +
+      '<button class="btn danger" id="tgStop">إيقاف</button></div>' +
+      '<div id="tgStatus" class="hint ' + (t.enabled ? 'ok' : '') + '">' +
+      (t.enabled ? 'يعمل الآن — أرسل رسالة للبوت' : 'متوقف') + '</div>' +
+      '<p class="muted small">الاستقبال يعمل طالما التطبيق نشط.</p>' +
+      '<div class="model-pick" style="margin-top:10px">' +
+      (IG.tgLog().slice().reverse().map(function (l) {
+        var d = new Date(l.ts).toLocaleTimeString('ar-EG');
+        var mark = l.dir === 'in' ? '< ' : (l.dir === 'out' ? '> ' : (l.dir === 'err' ? '! ' : '. '));
+        return '<div class="model-row"><span class="num">' + d + '</span><span class="nm">' +
+          U.esc(mark + l.text) + '</span></div>';
+      }).join('') || '<div class="model-row"><span class="nm">لا رسائل بعد</span></div>') +
+      '</div></div>';
+
+    var whCard =
+      '<div class="card">' +
+      '<h3 class="sect-title">03 — Webhook</h3>' +
+      '<p class="muted small">اربط Slack أو Discord أو أي خدمة: الوكيل يقدر يبعت تقاريره هناك.</p>' +
+      '<label class="fld"><span>رابط الـ Webhook</span>' +
+      '<input class="ltr" id="whUrl" placeholder="https://hooks.slack.com/..." value="' + U.esc(w.url) + '"></label>' +
+      '<div class="row"><button class="btn primary" id="whSave">حفظ</button>' +
+      '<button class="btn" id="whTest">إرسال تجربة</button></div>' +
+      '<div id="whStatus" class="hint ' + (w.enabled ? 'ok' : '') + '">' +
+      (w.enabled ? 'مفعّل' : 'غير مفعّل') + '</div></div>';
+
+    var activeTools = App.Tools.list();
+    var toolsCard =
+      '<div class="card"><h3 class="sect-title">04 — الأدوات المتاحة للوكلاء</h3>' +
+      '<div class="chips">' + (activeTools.length ? activeTools.map(function (n) {
+        return '<span class="tag">' + U.esc(n) + '</span>';
+      }).join('') : '<span class="muted small">لا أدوات</span>') + '</div>' +
+      '<p class="muted small">فعّل الأدوات لكل وكيل من تبويب «الوكلاء» ← تعديل.</p></div>';
+
+    box.innerHTML = ghCard + tgCard + whCard + toolsCard;
+    UI.bindIntegrations();
+  };
+
+  UI.bindIntegrations = function () {
+    var IG = App.Integrations;
+    var $ = function (s) { return U.$(s); };
+
+    $('#ghSave').onclick = function () {
+      var btn = this; btn.disabled = true;
+      var s = $('#ghStatus'); s.className = 'hint'; s.innerHTML = '<span class="spin"></span> جاري التحقق…';
+      IG.cfg('github').defaultRepo = $('#ghRepo').value.trim();
+      IG.verifyGithub($('#ghToken').value, $('#ghOwner').value).then(function (user) {
+        btn.disabled = false;
+        s.className = 'hint ok';
+        s.innerHTML = 'مربوط بحساب <b>' + U.esc(user) + '</b>';
+        UI.toast('تم ربط GitHub', 'ok'); UI.renderIntegrations();
+      }).catch(function (e) {
+        btn.disabled = false; s.className = 'hint err';
+        s.innerHTML = 'فشل: ' + U.esc(e.message || e);
+      });
+    };
+
+    $('#ghOff').onclick = function () {
+      UI.confirm('فصل حساب GitHub؟', 'فصل').then(function (y) {
+        if (!y) return;
+        IG.disconnectGithub(); UI.renderIntegrations(); UI.toast('تم الفصل');
+      });
+    };
+
+    $('#tgVerify').onclick = function () {
+      var btn = this; btn.disabled = true;
+      IG.tgVerify($('#tgToken').value).then(function (name) {
+        btn.disabled = false; $('#tgBot').textContent = '@' + name;
+        UI.toast('البوت: @' + name, 'ok'); UI.renderIntegrations();
+      }).catch(function (e) {
+        btn.disabled = false; UI.toast('فشل: ' + (e.message || e), 'err');
+      });
+    };
+
+    $('#tgAgent').onchange = function () { IG.cfg('telegram').agentId = this.value; IG.save(); };
+
+    $('#tgStart').onclick = function () {
+      var btn = this; btn.disabled = true;
+      var c = IG.cfg('telegram');
+      c.token = $('#tgToken').value.trim();
+      c.agentId = $('#tgAgent').value;
+      IG.save();
+      IG.tgStart().then(function () {
+        btn.disabled = false; UI.toast('تم تشغيل استقبال تليجرام', 'ok'); UI.renderIntegrations();
+      }).catch(function (e) {
+        btn.disabled = false; UI.toast('فشل: ' + (e.message || e), 'err');
+      });
+    };
+
+    $('#tgStop').onclick = function () {
+      IG.tgStop().then(function () { UI.toast('تم الإيقاف'); UI.renderIntegrations(); });
+    };
+
+    $('#whSave').onclick = function () {
+      var c = IG.cfg('webhook');
+      c.url = $('#whUrl').value.trim();
+      c.enabled = !!c.url;
+      IG.save(); UI.toast(c.enabled ? 'تم الحفظ' : 'تم إلغاء التفعيل', 'ok');
+      UI.renderIntegrations();
+    };
+
+    $('#whTest').onclick = function () {
+      var btn = this; btn.disabled = true;
+      var s = $('#whStatus'); s.className = 'hint'; s.innerHTML = '<span class="spin"></span> جاري الإرسال…';
+      IG.postWebhook('رسالة تجربة من مساحة الوكلاء', $('#whUrl').value.trim())
+        .then(function (m) { btn.disabled = false; s.className = 'hint ok'; s.textContent = m; })
+        .catch(function (e) { btn.disabled = false; s.className = 'hint err'; s.textContent = 'فشل: ' + (e.message || e); });
+    };
   };
 
   /* ============================== الإعدادات ============================== */

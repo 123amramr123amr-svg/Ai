@@ -8,6 +8,7 @@
 
   /* --------------------- توافق مع محرّكات WebView القديمة --------------------- */
   (function () {
+    if (typeof Element === 'undefined') return;
     if (!Element.prototype.matches) {
       Element.prototype.matches = Element.prototype.webkitMatchesSelector ||
         Element.prototype.mozMatchesSelector || Element.prototype.msMatchesSelector;

@@ -11,7 +11,10 @@ global.localStorage = {
   setItem(k, v) { this._d[k] = String(v); },
   removeItem(k) { delete this._d[k]; }
 };
+global.addEventListener = function () {};
+global.removeEventListener = function () {};
 global.document = {
+  getElementById() { return null; },
   querySelector() { return null; },
   querySelectorAll() { return []; },
   addEventListener() {},
@@ -19,7 +22,7 @@ global.document = {
 };
 try { global.navigator = { clipboard: null }; } catch (e) { /* Node يعرّفه كخاصية للقراءة فقط */ }
 
-['core', 'providers', 'chat', 'tools', 'agent', 'ui'].forEach(function (n) {
+['core', 'providers', 'chat', 'tools', 'integrations', 'conversations', 'agent', 'ui'].forEach(function (n) {
   const code = fs.readFileSync(path.join(root, 'assets/js', n + '.js'), 'utf8');
   eval(code); // eslint-disable-line no-eval
 });

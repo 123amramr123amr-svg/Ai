@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -140,7 +141,19 @@ public class MainActivity extends Activity {
 
         setContentView(web);
         web.loadUrl(START_URL);
+        requestNotifPermission();
 
+    }
+
+    private void requestNotifPermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[] { "android.permission.POST_NOTIFICATIONS" }, 2001);
+                }
+            }
+        } catch (Throwable ignored) { }
     }
 
     private static String guessMime(String path) {

@@ -295,6 +295,7 @@
     bindLists();
     bindChat();
     UI.bindSettings();
+    if (App.Integrations) { UI.renderIntegrations(); UI.bindIntegrations(); App.Integrations.resumeTelegram(); }
 
     if (!App.Http.hasNative()) {
       try {
