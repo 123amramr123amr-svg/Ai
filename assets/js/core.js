@@ -91,9 +91,12 @@
       return btoa(bin);
     },
     b64dec: function (b64) {
+      return new TextDecoder().decode(Util.b64bytes(b64));
+    },
+    b64bytes: function (b64) {
       var bin = atob(b64), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return new TextDecoder().decode(bytes);
+      return bytes;
     },
     download: function (name, text) {
       if (window.__nativeSave) {
@@ -128,6 +131,8 @@
         providers: [],
         agents: [],
         chats: {},
+        conversations: {},
+        activeConv: {},
         settings: { theme: 'dark', stream: true, confirmDelete: true, appName: 'مساحة الوكلاء' }
       };
     },
@@ -165,6 +170,27 @@
   var pending = {};
   var seq = 0;
 
+  /* ------------------------------ سجل التشخيص ------------------------------ */
+  var Log = App.Log = {
+    items: [],
+    add: function (e) {
+      e.ts = Date.now();
+      this.items.push(e);
+      if (this.items.length > 60) this.items.shift();
+    },
+    clear: function () { this.items = []; },
+    text: function () {
+      if (!this.items.length) return 'لا يوجد سجل بعد.';
+      return this.items.map(function (e) {
+        var t = new Date(e.ts).toLocaleTimeString('ar-EG');
+        var head = t + '  ' + e.method + ' ' + e.url.replace(/^https?:\/\//, '');
+        if (e.error) return head + '\n   ✗ ' + e.error;
+        return head + '\n   ← HTTP ' + e.status + ' · ' + (e.ms || 0) + 'ms' +
+          (e.sample ? '\n   ' + e.sample.replace(/\s+/g, ' ').slice(0, 300) : '');
+      }).join('\n\n');
+    }
+  };
+
   function hasNative() {
     return !!(window.NativeHttp && window.NativeHttp.available);
   }
@@ -179,8 +205,13 @@
       },
       chunk: function (id, b64) {
         var p = pending[id]; if (!p) return;
-        var text = '';
-        try { text = Util.b64dec(b64); } catch (e) { return; }
+        var bytes;
+        try { bytes = Util.b64bytes(b64); } catch (e) { return; }
+        if (!p.dec) { try { p.dec = new TextDecoder('utf-8'); } catch (e2) { p.dec = null; } }
+        var text;
+        if (p.dec) text = p.dec.decode(bytes, { stream: true });
+        else { try { text = Util.b64dec(b64); } catch (e3) { return; } }
+        if (!text) return;
         p.text += text;
         if (p.onChunk) p.onChunk(text);
       },
@@ -188,6 +219,11 @@
         var p = pending[id]; if (!p) return;
         delete pending[id];
         clearTimeout(p.timer);
+        if (p.dec) {
+          var tail = '';
+          try { tail = p.dec.decode(); } catch (e4) { }
+          if (tail) { p.text += tail; if (p.onChunk) p.onChunk(tail); }
+        }
         if (err) p.reject(new Error(err));
         else p.resolve({ status: p.status || 0, headers: p.headers || {}, text: p.text });
       }
@@ -203,7 +239,7 @@
         reject(new Error('انتهت المهلة'));
       }, o.timeout || 60000);
       pending[id] = {
-        resolve: resolve, reject: reject, text: '',
+        resolve: resolve, reject: reject, text: '', dec: null,
         status: 0, headers: {}, timer: timer,
         onChunk: o.onChunk, onHeaders: o.onHeaders
       };
@@ -253,10 +289,27 @@
     });
   }
 
+  function traced(o, fn) {
+    var t0 = Date.now();
+    return fn(o).then(function (r) {
+      Log.add({
+        method: (o.method || 'GET').toUpperCase(), url: o.url, status: r.status,
+        ms: Date.now() - t0, sample: String(r.text || '')
+      });
+      return r;
+    }, function (e) {
+      Log.add({
+        method: (o.method || 'GET').toUpperCase(), url: o.url,
+        ms: Date.now() - t0, error: String((e && e.message) || e)
+      });
+      throw e;
+    });
+  }
+
   App.Http = {
     hasNative: hasNative,
-    request: function (o) { return hasNative() ? nativeRequest(o) : fetchRequest(o); },
-    stream: function (o) { return hasNative() ? nativeRequest(o) : fetchRequest(o); },
+    request: function (o) { return traced(o, hasNative() ? nativeRequest : fetchRequest); },
+    stream: function (o) { return traced(o, hasNative() ? nativeRequest : fetchRequest); },
     probe: function (url, timeout) {
       return this.request({ url: url, method: 'GET', timeout: timeout || 5000 })
         .then(function (r) { return r.status; })

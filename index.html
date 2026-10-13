@@ -139,8 +139,14 @@
         </div>
       </div>
       <div class="chat-head-actions">
-        <button class="icon-btn" id="btnChatClear" title="محادثة جديدة" aria-label="محادثة جديدة">
+        <button class="icon-btn" id="btnChatClear" title="مسح رسائل المحادثة" aria-label="مسح رسائل المحادثة">
           <svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg>
+        </button>
+        <button class="icon-btn" id="btnChatList" title="كل المحادثات" aria-label="كل المحادثات">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+        <button class="icon-btn" id="btnChatNew" title="محادثة جديدة" aria-label="محادثة جديدة">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <button class="icon-btn" id="btnChatMenu" title="تعديل الوكيل" aria-label="تعديل الوكيل">
           <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>
@@ -178,7 +184,18 @@
       <p class="muted small">كل المفاتيح والبيانات تُخزَّن على جهازك فقط (localStorage) ولا تُرسَل لأي سيرفر وسيط.</p>
     </div>
     <div class="card">
-      <h3 class="sect-title">02 — عن التطبيق</h3>
+      <h3 class="sect-title">02 — تشخيص</h3>
+      <p class="muted small" id="diagSummary">—</p>
+      <div class="row">
+        <button class="btn" id="btnDiag">سجل الاتصالات</button>
+        <button class="btn primary" id="btnTestModel">اختبار النموذج</button>
+        <button class="btn danger" id="btnDiagClear">مسح السجل</button>
+      </div>
+      <div id="diagResult" class="hint"></div>
+    </div>
+
+    <div class="card">
+      <h3 class="sect-title">03 — عن التطبيق</h3>
       <p class="muted small" id="aboutText">—</p>
     </div>
   </section>
@@ -210,6 +227,7 @@
 <script src="assets/js/providers.js"></script>
 <script src="assets/js/chat.js"></script>
 <script src="assets/js/tools.js"></script>
+<script src="assets/js/conversations.js"></script>
 <script src="assets/js/agent.js"></script>
 <script src="assets/js/ui.js"></script>
 <script src="assets/js/boot.js"></script>

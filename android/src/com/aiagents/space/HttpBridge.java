@@ -95,10 +95,27 @@ public class HttpBridge {
             InputStream in = (status >= 400) ? conn.getErrorStream() : conn.getInputStream();
             if (in != null) {
                 byte[] buf = new byte[8192];
+                int carry = 0;
                 int n;
-                while ((n = in.read(buf)) > 0) {
-                    if (Thread.currentThread().isInterrupted()) break;
-                    String b64 = Base64.encodeToString(Arrays.copyOf(buf, n), Base64.NO_WRAP);
+                while (!Thread.currentThread().isInterrupted()) {
+                    if (carry >= buf.length) carry = 0;
+                    n = in.read(buf, carry, buf.length - carry);
+                    if (n <= 0) break;
+                    int total = carry + n;
+                    int safe = utf8SafeLen(buf, total);
+                    if (safe <= 0) {
+                        // لا يوجد حدّ صالح (دفعة أكبر من حرف واحد) — أرسلها كما هي
+                        safe = total;
+                    }
+                    if (safe > 0) {
+                        String b64 = Base64.encodeToString(Arrays.copyOf(buf, safe), Base64.NO_WRAP);
+                        call("window.__nh && window.__nh.chunk(" + js(id) + "," + js(b64) + ");");
+                    }
+                    carry = total - safe;
+                    if (carry > 0) System.arraycopy(buf, safe, buf, 0, carry);
+                }
+                if (carry > 0) {
+                    String b64 = Base64.encodeToString(Arrays.copyOf(buf, carry), Base64.NO_WRAP);
                     call("window.__nh && window.__nh.chunk(" + js(id) + "," + js(b64) + ");");
                 }
                 in.close();
@@ -113,6 +130,25 @@ public class HttpBridge {
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    /** يُعيد أطول بادئة لا تنتهي وسط حرف UTF-8 متعدّد البايتات. */
+    static int utf8SafeLen(byte[] buf, int len) {
+        int i = len;
+        int k = 0;
+        while (i > 0 && (buf[i - 1] & 0xC0) == 0x80 && k < 3) { i--; k++; }
+        if (i == 0) return len;
+        int b = buf[i - 1] & 0xFF;
+        int need;
+        if (b < 0x80) need = 1;
+        else if ((b & 0xE0) == 0xC0) need = 2;
+        else if ((b & 0xF0) == 0xE0) need = 3;
+        else if ((b & 0xF8) == 0xF0) need = 4;
+        else return len; // بايت غير صالح — لا تقتطع
+        int have = len - (i - 1);
+        if (have >= need) return len;
+        int cut = i - 1;
+        return cut;
     }
 
     private void call(final String jsCode) {

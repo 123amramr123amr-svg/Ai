@@ -37,7 +37,7 @@
         createdAt: Date.now()
       };
       st.agents.push(a);
-      if (!st.chats[a.id]) st.chats[a.id] = [];
+      if (App.Conv) App.Conv.create(a.id, 'محادثة جديدة', true);
       App.Store.save();
       return a;
     },
@@ -52,24 +52,34 @@
       var st = App.Store.state();
       st.agents = st.agents.filter(function (x) { return x.id !== id; });
       delete st.chats[id];
+      if (App.Conv) App.Conv.removeAllFor(id);
       App.Store.save();
     },
     history: function (id) {
-      var st = App.Store.state();
-      if (!st.chats[id]) st.chats[id] = [];
-      return st.chats[id];
+      return App.Conv.active(id).messages;
     },
     append: function (id, msg) {
-      var h = this.history(id);
+      var conv = App.Conv.active(id);
       msg.ts = Date.now();
-      h.push(msg);
-      if (h.length > 200) h.splice(0, h.length - 200);
+      conv.messages.push(msg);
+      if (conv.messages.length > 400) conv.messages.splice(0, conv.messages.length - 400);
+      conv.updatedAt = Date.now();
+      if (msg.role === 'user') App.Conv.autoTitle(id, conv.id, msg.content);
       App.Store.save();
       return msg;
     },
     clear: function (id) {
-      App.Store.state().chats[id] = [];
+      var conv = App.Conv.active(id);
+      conv.messages = [];
+      conv.title = 'محادثة جديدة';
+      conv.updatedAt = Date.now();
       App.Store.save();
+    },
+    newChat: function (id) {
+      return App.Conv.create(id);
+    },
+    conversations: function (id) {
+      return App.Conv.list(id);
     }
   };
 

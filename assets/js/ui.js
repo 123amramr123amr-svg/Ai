@@ -30,6 +30,30 @@
   };
   UI.closeModal = function () { U.$('#modal').hidden = true; U.$('#modalBox').innerHTML = ''; };
 
+  /* --------- تأكيد وإدخال بديلان (window.confirm/prompt لا يعملان في WebView) --------- */
+  UI.confirm = function (msg, okLabel) {
+    return new Promise(function (resolve) {
+      UI.modal('تأكيد', '<p style="margin:0 0 16px">' + U.esc(msg) + '</p>' +
+        '<div class="row"><button class="btn danger" id="cfYes">' + U.esc(okLabel || 'تأكيد') + '</button>' +
+        '<button class="btn" id="cfNo">إلغاء</button></div>', function () {
+        U.$('#cfYes').onclick = function () { UI.closeModal(); resolve(true); };
+        U.$('#cfNo').onclick = function () { UI.closeModal(); resolve(false); };
+      });
+    });
+  };
+
+  UI.prompt = function (msg, value) {
+    return new Promise(function (resolve) {
+      UI.modal(msg, '<input id="pmVal" value="' + U.esc(value || '') + '">' +
+        '<div class="row"><button class="btn primary" id="pmOk">حفظ</button>' +
+        '<button class="btn" id="pmNo">إلغاء</button></div>', function () {
+        setTimeout(function () { var i = U.$('#pmVal'); if (i) { i.focus(); i.select(); } }, 50);
+        U.$('#pmOk').onclick = function () { var v = U.$('#pmVal').value; UI.closeModal(); resolve(v); };
+        U.$('#pmNo').onclick = function () { UI.closeModal(); resolve(null); };
+      });
+    });
+  };
+
   /* ------------------------------ ماركداون مبسّط ------------------------------ */
   UI.md = function (src) {
     var s = U.esc(src || '');
@@ -165,8 +189,11 @@
     }
     if (act === 'del') {
       var st = App.Store.state();
-      if (st.settings.confirmDelete && !confirm('حذف هذا المزوّد ووكلائه؟')) return;
-      P.removeProvider(id); UI.toast('تم الحذف'); UI.renderProviders(); UI.renderAgents();
+      var doIt = function () {
+        P.removeProvider(id); UI.toast('تم الحذف'); UI.renderProviders(); UI.renderAgents();
+      };
+      if (st.settings.confirmDelete) UI.confirm('حذف هذا المزوّد وكل وكلائه؟', 'حذف').then(function (y) { if (y) doIt(); });
+      else doIt();
     }
     if (act === 'agent') {
       var p = P.get(id);
@@ -194,6 +221,7 @@
         '<div class="sub">' + U.esc(p ? p.name : 'بدون مزوّد') + ' · ' + U.esc(a.model || 'بدون نموذج') + '</div>' +
         '<div class="actions">' +
         '<button class="mini" data-act="chat" data-id="' + a.id + '">محادثة</button>' +
+        '<button class="mini" data-act="convs" data-id="' + a.id + '">' + App.Conv.totalFor(a.id) + ' محادثة</button>' +
         '<button class="mini" data-act="edit" data-id="' + a.id + '">تعديل</button>' +
         '<button class="mini danger" data-act="del" data-id="' + a.id + '">حذف</button>' +
         '</div></div>';
@@ -313,9 +341,10 @@
     }
     var a = App.Agent.get(id);
     var p = P.get(a.providerId);
+    var conv = App.Conv.active(id);
     U.$('#chatAvatar').textContent = a.emoji || '◆';
-    U.$('#chatName').textContent = a.name;
-    U.$('#chatModel').textContent = (p ? p.name : 'بدون مزوّد') + ' · ' + (a.model || '—');
+    U.$('#chatName').textContent = conv.title || 'محادثة جديدة';
+    U.$('#chatModel').textContent = a.name + ' · ' + (p ? p.name : 'بدون مزوّد') + ' · ' + (a.model || '—');
     UI.renderMessages();
   };
 
@@ -350,6 +379,61 @@
     d.innerHTML = body + calls;
     return d;
   };
+
+    UI.chatList = function () {
+      var agentId = UI.activeAgentId;
+      if (!agentId) return;
+      var html = '<button class="btn primary wide" id="convNew">+ محادثة جديدة</button>' +
+        '<div class="list" id="convItems"></div>';
+      UI.modal('محادثات الوكيل', html, function () {
+        function draw() {
+          var arr = App.Conv.list(agentId);
+          var cur = App.Conv.active(agentId).id;
+          U.$('#convItems').innerHTML = arr.map(function (c) {
+            var n = c.messages.filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).length;
+            var d = new Date(c.updatedAt);
+            return '<div class="item"><div class="body">' +
+              '<div class="title">' + U.esc(c.title) +
+              (c.id === cur ? ' <span class="tag free">الحالية</span>' : '') + '</div>' +
+              '<div class="sub">' + n + ' رسالة &middot; ' + d.toLocaleDateString('ar-EG') + '</div>' +
+              '<div class="actions">' +
+              '<button class="mini" data-cact="open" data-cid="' + c.id + '">فتح</button>' +
+              '<button class="mini" data-cact="rename" data-cid="' + c.id + '">إعادة تسمية</button>' +
+              '<button class="mini" data-cact="ai" data-cid="' + c.id + '">تسمية بالذكاء</button>' +
+              '<button class="mini danger" data-cact="del" data-cid="' + c.id + '">حذف</button>' +
+              '</div></div></div>';
+          }).join('') || '<div class="empty">لا محادثات بعد</div>';
+        }
+        draw();
+        U.$('#convNew').onclick = function () {
+          App.Conv.create(agentId); UI.closeModal(); UI.renderChat();
+        };
+        U.$('#convItems').addEventListener('click', function (e) {
+          var b = e.target.closest ? e.target.closest('[data-cact]') : null;
+          if (!b) return;
+          var act = b.getAttribute('data-cact'), cid = b.getAttribute('data-cid');
+          if (act === 'open') { App.Conv.setActive(agentId, cid); UI.closeModal(); UI.renderChat(); }
+          if (act === 'rename') {
+            UI.prompt('اسم المحادثة', '').then(function (t) {
+              if (t) { App.Conv.rename(agentId, cid, t); draw(); UI.renderChat(); }
+            });
+          }
+          if (act === 'ai') {
+            var old = b.textContent; b.textContent = '...';
+            App.Conv.aiTitle(agentId, cid).then(function (t) {
+              b.textContent = old; draw(); UI.renderChat();
+              UI.toast(t ? ('الاسم الجديد: ' + t) : 'تعذّرت التسمية', t ? 'ok' : 'err');
+            });
+          }
+          if (act === 'del') {
+            var go = function () { App.Conv.remove(agentId, cid); draw(); UI.renderChat(); };
+            if (App.Store.state().settings.confirmDelete !== false)
+              UI.confirm('حذف هذه المحادثة؟', 'حذف').then(function (y) { if (y) go(); });
+            else go();
+          }
+        });
+      });
+    };
 
   UI.chatSend = function () {
     if (UI.busy) return;
@@ -416,6 +500,14 @@
     U.$('#setTheme').value = s.theme || 'dark';
     U.$('#setStream').checked = s.stream !== false;
     U.$('#setConfirmDelete').checked = s.confirmDelete !== false;
+    var items = App.Log.items.length;
+    var lastErr = null;
+    for (var i = App.Log.items.length - 1; i >= 0; i--) {
+      if (App.Log.items[i].error) { lastErr = App.Log.items[i]; break; }
+    }
+    U.$('#diagSummary').textContent = items
+      ? (items + ' عملية اتصال مسجّلة' + (lastErr ? ' · آخر خطأ: ' + String(lastErr.error).slice(0, 70) : ' · لا أخطاء'))
+      : 'لا يوجد سجل اتصالات بعد.';
     U.$('#aboutText').innerHTML =
       'التطبيق يعمل بالكامل من جهازك، بدون سيرفر وسيط. مفاتيحك تُحفظ محليًا فقط.<br>' +
       'الإصدار 1.0 · ' + (App.Http.hasNative() ? 'محرّك الشبكة: أصلي (بدون قيود CORS)' : 'محرّك الشبكة: المتصفح (fetch)');
@@ -440,11 +532,53 @@
       UI.toast('تم تصدير الملف (يحتوي مفاتيحك — احفظه في مكان آمن)', 'ok');
     };
     U.$('#btnImportData').onclick = function () { U.$('#bulkFile').click(); UI.tab('providers'); };
-    U.$('#btnWipe').onclick = function () {
-      if (!confirm('سيتم حذف كل المزوّدين والوكلاء والمحادثات. متأكد؟')) return;
-      App.Store.reset(); UI.applyTheme(); UI.tab('providers'); UI.renderAgents();
-      UI.toast('تم حذف كل البيانات');
+    U.$('#btnDiag').onclick = function () {
+      UI.modal('سجل الاتصالات',
+        '<pre style="white-space:pre-wrap;font-family:var(--mono);font-size:10.5px;line-height:1.9;' +
+        'max-height:60vh;overflow:auto;direction:ltr;text-align:left">' +
+        U.esc(App.Log.text()) + '</pre>');
     };
+    U.$('#btnDiagClear').onclick = function () {
+      App.Log.clear(); UI.renderSettings(); UI.toast('تم مسح السجل');
+    };
+    U.$('#btnTestModel').onclick = UI.testModel;
+    U.$('#btnWipe').onclick = function () {
+      UI.confirm('سيتم حذف كل المزوّدين والوكلاء والمحادثات نهائيًا.', 'حذف الكل').then(function (y) {
+        if (!y) return;
+        App.Store.reset(); UI.activeAgentId = null;
+        UI.applyTheme(); UI.tab('providers'); UI.renderAgents();
+        UI.toast('تم حذف كل البيانات');
+      });
+    };
+  };
+
+  UI.testModel = function () {
+    var el = U.$('#diagResult');
+    var ag = App.Agent.list()[0];
+    var provider = null, model = '';
+    if (ag) { provider = P.get(ag.providerId); model = ag.model; }
+    if (!provider) {
+      provider = P.list()[0];
+      model = provider && provider.models[0] ? provider.models[0].id : '';
+    }
+    if (!provider) { el.className = 'hint err'; el.textContent = 'أضف مزوّدًا ومفتاحًا أولًا.'; return; }
+    if (!model) { el.className = 'hint err'; el.textContent = 'لا يوجد نموذج مختار — اضغط «تحديث» على المزوّد.'; return; }
+    el.className = 'hint';
+    el.innerHTML = '<span class="spin"></span> جاري إرسال رسالة قصيرة إلى النموذج…';
+    App.Chat.send({
+      provider: provider, model: model, stream: false, temperature: 0,
+      messages: [{ role: 'user', content: 'قل كلمة واحدة: تم' }]
+    }).then(function (r) {
+      el.className = 'hint ok';
+      el.innerHTML = '✅ النموذج يرد فعلًا.<br>' + U.esc(model) + '<br>الرد: ' +
+        U.esc(String(r.text || '(رد فارغ)').slice(0, 250));
+      UI.renderSettings();
+    }).catch(function (e) {
+      el.className = 'hint err';
+      el.innerHTML = '⚠ فشل: ' + U.esc(e.message || e) + '<br>' + U.esc(model) +
+        '<br>راجع «سجل الاتصالات» لمعرفة التفاصيل.';
+      UI.renderSettings();
+    });
   };
 
   /* ------------------------------ مساعدة ------------------------------ */

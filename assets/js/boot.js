@@ -19,9 +19,17 @@
     U.$('#btnNewAgent').onclick = function () { UI.agentEditor(null); };
     U.$('#btnChatBack').onclick = function () { UI.tab('agents'); };
     U.$('#btnChatClear').onclick = function () {
+      var id = UI.activeAgentId;
+      if (!id) return;
+      UI.confirm('مسح رسائل المحادثة الحالية؟', 'مسح').then(function (y) {
+        if (!y) return;
+        App.Agent.clear(id); UI.renderChat();
+      });
+    };
+    U.$('#btnChatList').onclick = UI.chatList;
+    U.$('#btnChatNew').onclick = function () {
       if (!UI.activeAgentId) return;
-      if (!confirm('بدء محادثة جديدة؟')) return;
-      App.Agent.clear(UI.activeAgentId); UI.renderMessages();
+      App.Conv.create(UI.activeAgentId); UI.renderChat(); UI.toast('محادثة جديدة');
     };
     U.$('#btnChatMenu').onclick = function () {
       if (!UI.activeAgentId) return;
@@ -244,12 +252,17 @@
       var b = e.target.closest('[data-act]'); if (!b) return;
       var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
       if (act === 'chat') UI.openChat(id);
+      if (act === 'convs') { UI.openChat(id); UI.chatList(); }
       if (act === 'edit') UI.agentEditor(id);
       if (act === 'del') {
-        if (App.Store.state().settings.confirmDelete !== false && !confirm('حذف هذا الوكيل ومحادثاته؟')) return;
-        App.Agent.remove(id);
-        if (UI.activeAgentId === id) UI.activeAgentId = null;
-        UI.toast('تم حذف الوكيل'); UI.renderAgents();
+        var go = function () {
+          App.Agent.remove(id);
+          if (UI.activeAgentId === id) UI.activeAgentId = null;
+          UI.toast('تم حذف الوكيل'); UI.renderAgents();
+        };
+        if (App.Store.state().settings.confirmDelete !== false)
+          UI.confirm('حذف هذا الوكيل وكل محادثاته؟', 'حذف').then(function (y) { if (y) go(); });
+        else go();
       }
     });
   }
@@ -271,6 +284,7 @@
   /* --------------------------- الإقلاع --------------------------- */
   function init() {
     App.Store.load();
+    App.Conv.migrate();
     UI.applyTheme();
     UI.renderPresetSelect();
     bindTabs();
