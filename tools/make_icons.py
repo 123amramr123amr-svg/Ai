@@ -77,7 +77,7 @@ def png(path, size):
     print('wrote', path, os.path.getsize(path), 'bytes')
 
 if __name__ == '__main__':
-    base = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icons')
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'icons')
     os.makedirs(base, exist_ok=True)
     png(os.path.join(base, 'icon-192.png'), 192)
     png(os.path.join(base, 'icon-512.png'), 512)
