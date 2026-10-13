@@ -13,22 +13,26 @@
 <body>
 
 <div id="splash" class="splash">
-  <div class="splash-logo">🤖</div>
+  <div class="splash-mark"></div>
   <div class="splash-title">مساحة الوكلاء</div>
-  <div class="splash-sub">مساحة حرّة لتشغيل وكلاء الذكاء الاصطناعي بمفاتيحك الخاصة</div>
+  <div class="splash-sub">AI Agents Runtime</div>
 </div>
 
 <header class="topbar">
   <div class="topbar-right">
-    <span class="logo">🤖</span>
+    <span class="logo">AI</span>
     <div>
       <div class="brand">مساحة الوكلاء</div>
       <div class="brand-sub" id="statusLine">لا يوجد مزوّد مُفعّل</div>
     </div>
   </div>
   <div class="topbar-left">
-    <button class="icon-btn" id="btnHelp" title="مساعدة">؟</button>
-    <button class="icon-btn" id="btnSettings" title="الإعدادات">⚙</button>
+    <button class="icon-btn" id="btnHelp" title="مساعدة" aria-label="مساعدة">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.6a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.3"/><circle cx="12" cy="16.8" r=".7" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <button class="icon-btn" id="btnSettings" title="الإعدادات" aria-label="الإعدادات">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg>
+    </button>
   </div>
 </header>
 
@@ -51,11 +55,11 @@
         <label class="fld"><span>اختر المزوّد</span><select id="presetSelect"></select></label>
         <div id="presetHint" class="hint"></div>
         <label class="fld"><span>مفتاح API</span>
-          <input id="presetKey" type="password" placeholder="الصق المفتاح هنا" autocomplete="off" spellcheck="false"></label>
+          <input id="presetKey" class="ltr" type="password" placeholder="الصق المفتاح هنا" autocomplete="off" spellcheck="false"></label>
         <label class="fld" id="presetBaseWrap" style="display:none"><span>رابط الـ API (Base URL)</span>
-          <input id="presetBase" type="url" placeholder="https://..." spellcheck="false"></label>
+          <input id="presetBase" class="ltr" type="url" placeholder="https://..." spellcheck="false"></label>
         <label class="fld" id="presetRefererWrap" style="display:none"><span>رابط موقعك (اختياري)</span>
-          <input id="presetReferer" type="url" placeholder="https://example.com" spellcheck="false"></label>
+          <input id="presetReferer" class="ltr" type="url" placeholder="https://example.com" spellcheck="false"></label>
         <div class="row">
           <button class="btn primary" id="btnAddPreset">تحقّق وأضف</button>
           <label class="chk"><input type="checkbox" id="presetFree"> نماذج مجانية فقط</label>
@@ -64,7 +68,7 @@
 
       <div class="method" data-panel="paste" style="display:none">
         <label class="fld"><span>الصق المفتاح وسنكتشف المزوّد تلقائيًا</span>
-          <textarea id="pasteKey" rows="3" placeholder="sk-or-... / sk-... / AIza... / gsk_..." spellcheck="false"></textarea></label>
+          <textarea id="pasteKey" class="ltr" rows="3" placeholder="sk-or-... / sk-... / AIza... / gsk_..." spellcheck="false"></textarea></label>
         <div class="row">
           <button class="btn primary" id="btnAutoDetect">اكتشاف المزوّد</button>
           <button class="btn" id="btnAutoAdd">تحقّق وأضف تلقائيًا</button>
@@ -82,13 +86,13 @@
           </select></label>
         </div>
         <label class="fld"><span>رابط الـ API (Base URL)</span>
-          <input id="custBase" type="url" placeholder="https://api.example.com/v1" spellcheck="false"></label>
+          <input id="custBase" class="ltr" type="url" placeholder="https://api.example.com/v1" spellcheck="false"></label>
         <label class="fld"><span>مفتاح API (اتركه فارغًا إن لم يطلب السيرفر مفتاحًا)</span>
-          <input id="custKey" type="password" placeholder="اختياري" autocomplete="off" spellcheck="false"></label>
+          <input id="custKey" class="ltr" type="password" placeholder="اختياري" autocomplete="off" spellcheck="false"></label>
         <label class="fld"><span>رأس التحقق (Header) — اختياري</span>
-          <input id="custHeader" placeholder="Authorization: Bearer {key}" spellcheck="false"></label>
+          <input id="custHeader" class="ltr" placeholder="Authorization: Bearer {key}" spellcheck="false"></label>
         <label class="fld"><span>مسار جلب النماذج — اختياري</span>
-          <input id="custModelsPath" placeholder="/models" spellcheck="false"></label>
+          <input id="custModelsPath" class="ltr" placeholder="/models" spellcheck="false"></label>
         <div class="row">
           <button class="btn primary" id="btnAddCustom">تحقّق وأضف</button>
           <button class="btn" id="btnTestCustom">اختبار فقط</button>
@@ -98,7 +102,7 @@
 
       <div class="method" data-panel="bulk" style="display:none">
         <label class="fld"><span>أضف عدة مفاتيح مرة واحدة (سطر لكل مفتاح)</span>
-          <textarea id="bulkText" rows="6" placeholder="sk-or-...&#10;sk-...&#10;AIza..." spellcheck="false"></textarea></label>
+          <textarea id="bulkText" class="ltr" rows="6" placeholder="sk-or-...&#10;sk-...&#10;AIza..." spellcheck="false"></textarea></label>
         <label class="fld"><span>أو استورد ملف إعدادات JSON مُصدَّر من التطبيق</span>
           <input id="bulkFile" type="file" accept="application/json,.json"></label>
         <div class="row">
@@ -109,7 +113,7 @@
       </div>
     </div>
 
-    <h3 class="sect-title">المزوّدون المُضافون</h3>
+    <h3 class="sect-title">01 — المُضافون</h3>
     <div id="providerList" class="list"></div>
   </section>
 
@@ -118,30 +122,40 @@
       <h2>الوكلاء</h2>
       <p class="muted">اصنع وكيلًا لكل مهمة: اختر النموذج، اكتب شخصيته، وحدّد الأدوات التي يستخدمها.</p>
     </div>
-    <button class="btn primary wide" id="btnNewAgent">＋ وكيل جديد</button>
+    <button class="btn primary wide" id="btnNewAgent">+ وكيل جديد</button>
     <div id="agentList" class="list"></div>
   </section>
 
   <section class="view" id="view-chat" data-view="chat" hidden>
     <div class="chat-head">
-      <button class="icon-btn" id="btnChatBack" title="رجوع">‹</button>
+      <button class="icon-btn" id="btnChatBack" title="رجوع" aria-label="رجوع">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
       <div class="chat-agent" id="chatAgentInfo">
-        <span class="avatar" id="chatAvatar">🤖</span>
+        <span class="avatar" id="chatAvatar">AI</span>
         <div>
           <div class="chat-name" id="chatName">اختر وكيلًا</div>
-          <div class="chat-model muted" id="chatModel">—</div>
+          <div class="chat-model" id="chatModel">—</div>
         </div>
       </div>
       <div class="chat-head-actions">
-        <button class="icon-btn" id="btnChatClear" title="محادثة جديدة">🗑</button>
-        <button class="icon-btn" id="btnChatMenu" title="خيارات">⋯</button>
+        <button class="icon-btn" id="btnChatClear" title="محادثة جديدة" aria-label="محادثة جديدة">
+          <svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V5h6v2M7 7l1 12h8l1-12"/></svg>
+        </button>
+        <button class="icon-btn" id="btnChatMenu" title="تعديل الوكيل" aria-label="تعديل الوكيل">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></svg>
+        </button>
       </div>
     </div>
     <div id="chatMessages" class="messages"></div>
     <div class="composer">
-      <button class="icon-btn" id="btnStop" title="إيقاف" hidden>■</button>
+      <button class="icon-btn" id="btnStop" title="إيقاف" aria-label="إيقاف" hidden>
+        <svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+      </button>
       <textarea id="chatInput" rows="1" placeholder="اكتب رسالتك…"></textarea>
-      <button class="btn primary send" id="btnSend" title="إرسال">➤</button>
+      <button class="btn primary send" id="btnSend" title="إرسال" aria-label="إرسال">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"><path d="M20 12H5M12 5l-7 7 7 7"/></svg>
+      </button>
     </div>
   </section>
 
@@ -155,7 +169,7 @@
       <label class="chk"><input type="checkbox" id="setConfirmDelete"> تأكيد قبل الحذف</label>
     </div>
     <div class="card">
-      <h3 class="sect-title">النسخ الاحتياطي</h3>
+      <h3 class="sect-title">01 — النسخ الاحتياطي</h3>
       <div class="row">
         <button class="btn" id="btnExport">تصدير كل البيانات</button>
         <button class="btn" id="btnImportData">استيراد</button>
@@ -164,17 +178,29 @@
       <p class="muted small">كل المفاتيح والبيانات تُخزَّن على جهازك فقط (localStorage) ولا تُرسَل لأي سيرفر وسيط.</p>
     </div>
     <div class="card">
-      <h3 class="sect-title">عن التطبيق</h3>
+      <h3 class="sect-title">02 — عن التطبيق</h3>
       <p class="muted small" id="aboutText">—</p>
     </div>
   </section>
 </main>
 
 <nav class="tabbar" id="tabbar">
-  <button class="tab active" data-tab="providers"><span>🔑</span><em>المزوّدون</em></button>
-  <button class="tab" data-tab="agents"><span>🧩</span><em>الوكلاء</em></button>
-  <button class="tab" data-tab="chat"><span>💬</span><em>المحادثة</em></button>
-  <button class="tab" data-tab="settings"><span>⚙️</span><em>الإعدادات</em></button>
+  <button class="tab active" data-tab="providers">
+    <svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.4"/><path d="M11.4 12H20M17.6 12v3.2M20 12v2.6"/></svg>
+    <em>المزوّدون</em>
+  </button>
+  <button class="tab" data-tab="agents">
+    <svg viewBox="0 0 24 24"><path d="M12 3.2l8 4.4-8 4.4-8-4.4z"/><path d="M4 12.4l8 4.4 8-4.4"/></svg>
+    <em>الوكلاء</em>
+  </button>
+  <button class="tab" data-tab="chat">
+    <svg viewBox="0 0 24 24"><path d="M4 5.5h16v10.6H9.4L4 20.5z"/></svg>
+    <em>المحادثة</em>
+  </button>
+  <button class="tab" data-tab="settings">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></svg>
+    <em>الإعدادات</em>
+  </button>
 </nav>
 
 <div class="modal" id="modal" hidden><div class="modal-box" id="modalBox"></div></div>

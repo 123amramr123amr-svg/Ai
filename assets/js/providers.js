@@ -11,86 +11,86 @@
   /* ------------------------------ المزوّدون الجاهزون ------------------------------ */
   var PRESETS = [
     {
-      id: 'openrouter', name: 'OpenRouter (نماذج مجانية كثيرًا)', icon: '🟣', type: 'openai',
+      id: 'openrouter', abbr: 'OR', name: 'OpenRouter (نماذج مجانية كثيرًا)', icon: '🟣', type: 'openai',
       baseUrl: 'https://openrouter.ai/api/v1', keyPrefixes: ['sk-or-'],
       keyUrl: 'https://openrouter.ai/keys', hasFree: true,
       note: 'أكبر بوابة: مئات النماذج من كل الشركات، وفيها قائمة طويلة من النماذج المجانية (تظهر بوسم «مجاني»).',
       extraHeaders: { 'X-Title': 'AI Agents Space' }
     },
     {
-      id: 'openai', name: 'OpenAI', icon: '⚫', type: 'openai',
+      id: 'openai', abbr: 'OA', name: 'OpenAI', icon: '⚫', type: 'openai',
       baseUrl: 'https://api.openai.com/v1', keyPrefixes: ['sk-proj-', 'sk-'],
       keyUrl: 'https://platform.openai.com/api-keys',
       note: 'النماذج الأصلية من OpenAI مثل GPT-4o و GPT-4.1 و o-series.'
     },
     {
-      id: 'deepseek', name: 'DeepSeek', icon: '🐋', type: 'openai',
+      id: 'deepseek', abbr: 'DS', name: 'DeepSeek', icon: '🐋', type: 'openai',
       baseUrl: 'https://api.deepseek.com/v1', keyPrefixes: ['sk-'],
       keyUrl: 'https://platform.deepseek.com/api_keys',
       note: 'نماذج DeepSeek مثل deepseek-chat و deepseek-reasoner.'
     },
     {
-      id: 'google', name: 'Google AI Studio (Gemini)', icon: '🔷', type: 'gemini',
+      id: 'google', abbr: 'GA', name: 'Google AI Studio (Gemini)', icon: '🔷', type: 'gemini',
       baseUrl: 'https://generativelanguage.googleapis.com/' + GEMINI_VER, keyPrefixes: ['AIza'],
       keyUrl: 'https://aistudio.google.com/app/apikey', hasFree: true,
       note: 'مفاتيح Google AI Studio المجانية تبدأ بـ AIza — نماذج Gemini.'
     },
     {
-      id: 'anthropic', name: 'Anthropic (Claude)', icon: '🟠', type: 'anthropic',
+      id: 'anthropic', abbr: 'AN', name: 'Anthropic (Claude)', icon: '🟠', type: 'anthropic',
       baseUrl: 'https://api.anthropic.com/v1', keyPrefixes: ['sk-ant-'],
       keyUrl: 'https://console.anthropic.com/settings/keys',
       note: 'نماذج Claude من Anthropic.'
     },
     {
-      id: 'groq', name: 'Groq (سريع جدًا)', icon: '⚡', type: 'openai',
+      id: 'groq', abbr: 'GQ', name: 'Groq (سريع جدًا)', icon: '⚡', type: 'openai',
       baseUrl: 'https://api.groq.com/openai/v1', keyPrefixes: ['gsk_'],
       keyUrl: 'https://console.groq.com/keys', hasFree: true,
       note: 'استدلال فائق السرعة، وعنده طبقة مجانية سخية.'
     },
     {
-      id: 'mistral', name: 'Mistral AI', icon: '🌪', type: 'openai',
+      id: 'mistral', abbr: 'MI', name: 'Mistral AI', icon: '🌪', type: 'openai',
       baseUrl: 'https://api.mistral.ai/v1', keyPrefixes: [],
       keyUrl: 'https://console.mistral.ai/api-keys', hasFree: true,
       note: 'نماذج Mistral و Codestral.'
     },
     {
-      id: 'together', name: 'Together AI', icon: '🤝', type: 'openai',
+      id: 'together', abbr: 'TG', name: 'Together AI', icon: '🤝', type: 'openai',
       baseUrl: 'https://api.together.xyz/v1', keyPrefixes: [],
       keyUrl: 'https://api.together.ai/settings/api-keys', hasFree: true,
       note: 'مئات النماذج مفتوحة المصدر.'
     },
     {
-      id: 'xai', name: 'xAI (Grok)', icon: '✖️', type: 'openai',
+      id: 'xai', abbr: 'XA', name: 'xAI (Grok)', icon: '✖️', type: 'openai',
       baseUrl: 'https://api.x.ai/v1', keyPrefixes: ['xai-'],
       keyUrl: 'https://console.x.ai',
       note: 'نماذج Grok من xAI.'
     },
     {
-      id: 'fireworks', name: 'Fireworks AI', icon: '🎆', type: 'openai',
+      id: 'fireworks', abbr: 'FW', name: 'Fireworks AI', icon: '🎆', type: 'openai',
       baseUrl: 'https://api.fireworks.ai/inference/v1', keyPrefixes: ['fw_'],
       keyUrl: 'https://fireworks.ai/account/api-keys',
       note: 'نماذج استدلال مفتوحة بسرعة عالية.'
     },
     {
-      id: 'cerebras', name: 'Cerebras', icon: '🧠', type: 'openai',
+      id: 'cerebras', abbr: 'CB', name: 'Cerebras', icon: '🧠', type: 'openai',
       baseUrl: 'https://api.cerebras.ai/v1', keyPrefixes: ['csk-'],
       keyUrl: 'https://cloud.cerebras.ai',
       note: 'استدلال فائق السرعة على رقائق Cerebras.'
     },
     {
-      id: 'ollama', name: 'Ollama (محلي على جهازك)', icon: '🦙', type: 'openai',
+      id: 'ollama', abbr: 'OL', name: 'Ollama (محلي على جهازك)', icon: '🦙', type: 'openai',
       baseUrl: 'http://localhost:11434/v1', keyPrefixes: [], noKey: true,
       keyUrl: 'https://ollama.com/download', local: true,
       note: 'يحتاج تشغيل Ollama على نفس الجهاز. لا يحتاج مفتاحًا.'
     },
     {
-      id: 'lmstudio', name: 'LM Studio (محلي)', icon: '🖥', type: 'openai',
+      id: 'lmstudio', abbr: 'LM', name: 'LM Studio (محلي)', icon: '🖥', type: 'openai',
       baseUrl: 'http://localhost:1234/v1', keyPrefixes: [], noKey: true,
       keyUrl: 'https://lmstudio.ai', local: true,
       note: 'يحتاج تشغيل سيرفر LM Studio على المنفذ 1234. لا يحتاج مفتاحًا.'
     },
     {
-      id: 'custom', name: '— مزوّد مخصص (أدخل الرابط بنفسك) —', icon: '🧩', type: 'openai',
+      id: 'custom', abbr: '+', name: '— مزوّد مخصص (أدخل الرابط بنفسك) —', icon: '🧩', type: 'openai',
       baseUrl: '', keyPrefixes: [], custom: true,
       note: 'أي سيرفر متوافق مع OpenAI (مثل vLLM أو OpenRouter clone أو سيرفرك الخاص).'
     }

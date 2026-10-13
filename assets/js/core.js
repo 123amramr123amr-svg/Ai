@@ -6,6 +6,48 @@
   'use strict';
   var App = window.App = window.App || {};
 
+  /* --------------------- توافق مع محرّكات WebView القديمة --------------------- */
+  (function () {
+    if (!Element.prototype.matches) {
+      Element.prototype.matches = Element.prototype.webkitMatchesSelector ||
+        Element.prototype.mozMatchesSelector || Element.prototype.msMatchesSelector;
+    }
+    if (!Element.prototype.closest) {
+      Element.prototype.closest = function (sel) {
+        var el = this;
+        while (el && el.nodeType === 1) {
+          if (el.matches && el.matches(sel)) return el;
+          el = el.parentElement || el.parentNode;
+        }
+        return null;
+      };
+    }
+    if (!Object.assign) {
+      Object.assign = function (t) {
+        for (var i = 1; i < arguments.length; i++) {
+          var s = arguments[i];
+          for (var k in s) if (Object.prototype.hasOwnProperty.call(s, k)) t[k] = s[k];
+        }
+        return t;
+      };
+    }
+  })();
+
+  /* --------------------- مراقب الأخطاء (يساعد في التشخيص) --------------------- */
+  var errShown = 0;
+  window.addEventListener('error', function (e) {
+    if (errShown++ > 2) return;
+    try {
+      var box = document.getElementById('toasts');
+      if (!box) return;
+      var d = document.createElement('div');
+      d.className = 'toast err';
+      d.textContent = 'خطأ: ' + (e && e.message ? e.message : 'غير معروف');
+      box.appendChild(d);
+      setTimeout(function () { d.remove(); }, 7000);
+    } catch (x) { }
+  });
+
   /* ------------------------------ أدوات ------------------------------ */
   var Util = App.Util = {
     uid: function (p) {

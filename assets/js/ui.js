@@ -54,6 +54,10 @@
     document.documentElement.setAttribute('data-theme', st.settings.theme || 'dark');
   };
 
+  UI.scrollBottom = function () {
+    try { window.scrollTo(0, document.body.scrollHeight); } catch (e) { }
+  };
+
   UI.tab = function (name) {
     U.$$('.view').forEach(function (v) { v.hidden = v.getAttribute('data-view') !== name; });
     U.$$('.tab').forEach(function (t) { t.classList.toggle('active', t.getAttribute('data-tab') === name); });
@@ -62,7 +66,7 @@
     if (name === 'agents') UI.renderAgents();
     if (name === 'chat') UI.renderChat();
     if (name === 'settings') UI.renderSettings();
-    window.scrollTo(0, 0);
+    UI.scrollBottom();
   };
 
   UI.statusLine = function () {
@@ -78,7 +82,7 @@
     if (sel.options.length) return;
     P.PRESETS.forEach(function (pre) {
       var o = document.createElement('option');
-      o.value = pre.id; o.textContent = (pre.icon || '') + ' ' + pre.name;
+      o.value = pre.id; o.textContent = (pre.abbr ? pre.abbr + '  ·  ' : '') + pre.name;
       sel.appendChild(o);
     });
     sel.value = 'openrouter';
@@ -100,7 +104,7 @@
     UI.statusLine();
     var box = U.$('#providerList'), ps = P.list();
     if (!ps.length) {
-      box.innerHTML = '<div class="empty">لا يوجد مزوّدون بعد.<br>أضف مفتاحك من الأعلى — من OpenRouter أو مزوّد أصلي أو مزوّد مخصص 🚀</div>';
+      box.innerHTML = '<div class="empty">لا يوجد مزوّدون بعد.<br>أضف مفتاحك من الأعلى — من OpenRouter أو مزوّد أصلي أو مزوّد مخصص.</div>';
       return;
     }
     box.innerHTML = '';
@@ -111,18 +115,18 @@
       var freeCount = (p.models || []).filter(function (m) { return m.free; }).length;
       var shown = p.freeOnly ? (p.models || []).filter(function (m) { return m.free; }) : (p.models || []);
       it.innerHTML =
-        '<div class="ico">' + (p.icon || '🔌') + '</div>' +
+        '<div class="ico">' + (p.abbr || p.icon || '··') + '</div>' +
         '<div class="body">' +
         '<div class="title"><span class="dot ' + dotCls + '"></span>' + U.esc(p.name) +
         '<span class="tag prov">' + U.esc(p.type) + '</span>' +
         (p.status === 'ok' ? '<span class="tag">' + shown.length + ' نموذج</span>' : '') +
         (freeCount ? '<span class="tag free">' + freeCount + ' مجاني</span>' : '') + '</div>' +
-        '<div class="sub">' + U.esc(U.host(p.baseUrl)) + ' · مفتاح: ' + U.esc(p.keyHint || '') + '</div>' +
+        '<div class="sub">مفتاح: <span dir="ltr">' + U.esc(p.keyHint || '') + '</span> · <span dir="ltr">' + U.esc(U.host(p.baseUrl)) + '</span></div>' +
         (p.statusText ? '<div class="sub">' + U.esc(p.statusText) + '</div>' : '') +
         '<div class="actions">' +
         '<button class="mini" data-act="models" data-id="' + p.id + '">النماذج</button>' +
-        '<button class="mini" data-act="refresh" data-id="' + p.id + '">↻ تحديث</button>' +
-        '<button class="mini" data-act="agent" data-id="' + p.id + '">＋ وكيل</button>' +
+        '<button class="mini" data-act="refresh" data-id="' + p.id + '">تحديث</button>' +
+        '<button class="mini" data-act="agent" data-id="' + p.id + '">+ وكيل</button>' +
         '<button class="mini danger" data-act="del" data-id="' + p.id + '">حذف</button>' +
         '</div></div>';
       box.appendChild(it);
@@ -175,7 +179,7 @@
   UI.renderAgents = function () {
     var box = U.$('#agentList'), list = App.Agent.list();
     if (!list.length) {
-      box.innerHTML = '<div class="empty">لا يوجد وكلاء بعد.<br>اضغط «وكيل جديد» لإنشاء أول وكيل 🤖</div>';
+      box.innerHTML = '<div class="empty">لا يوجد وكلاء بعد.<br>اضغط «وكيل جديد» لإنشاء أول وكيل.</div>';
       return;
     }
     box.innerHTML = '';
@@ -184,12 +188,12 @@
       var it = document.createElement('div');
       it.className = 'item';
       it.innerHTML =
-        '<div class="ico">' + U.esc(a.emoji || '🤖') + '</div>' +
+        '<div class="ico">' + U.esc(a.emoji || '◆') + '</div>' +
         '<div class="body"><div class="title">' + U.esc(a.name) +
         (a.tools && a.tools.length ? '<span class="tag">' + a.tools.length + ' أداة</span>' : '') + '</div>' +
         '<div class="sub">' + U.esc(p ? p.name : 'بدون مزوّد') + ' · ' + U.esc(a.model || 'بدون نموذج') + '</div>' +
         '<div class="actions">' +
-        '<button class="mini" data-act="chat" data-id="' + a.id + '">💬 محادثة</button>' +
+        '<button class="mini" data-act="chat" data-id="' + a.id + '">محادثة</button>' +
         '<button class="mini" data-act="edit" data-id="' + a.id + '">تعديل</button>' +
         '<button class="mini danger" data-act="del" data-id="' + a.id + '">حذف</button>' +
         '</div></div>';
@@ -208,7 +212,7 @@
 
     var provOpts = providers.map(function (p) {
       return '<option value="' + p.id + '"' + (p.id === cfg.providerId ? ' selected' : '') + '>' +
-        U.esc((p.icon || '') + ' ' + p.name) + '</option>';
+        U.esc(p.name) + '</option>';
     }).join('');
 
     var tplOpts = App.Agent.TEMPLATES.map(function (t, i) {
@@ -219,12 +223,13 @@
       var d = App.Tools.DEFS[n];
       var on = (cfg.tools || []).indexOf(n) >= 0;
       return '<label class="chk"><input type="checkbox" value="' + n + '"' + (on ? ' checked' : '') + '>' +
-        d.icon + ' ' + U.esc(d.label) + ' — <span class="small">' + U.esc(d.desc) + '</span></label>';
+        '<b>' + U.esc(d.label) + '</b> — <span class="small">' + U.esc(d.desc) + '</span></label>';
+
     }).join('');
 
     var html =
       '<div class="grid2">' +
-      '<label class="fld"><span>رمز الوكيل</span><input id="aeEmoji" maxlength="4" value="' + U.esc(cfg.emoji || '🤖') + '"></label>' +
+      '<label class="fld"><span>رمز الوكيل</span><input id="aeEmoji" maxlength="4" value="' + U.esc(cfg.emoji || '◆') + '"></label>' +
       '<label class="fld"><span>اسم الوكيل</span><input id="aeName" value="' + U.esc(cfg.name || '') + '" placeholder="مثال: مساعد التسويق"></label>' +
       '</div>' +
       '<label class="fld"><span>من قالب جاهز (اختياري)</span><select id="aeTpl"><option value="">— اختر قالبًا —</option>' + tplOpts + '</select></label>' +
@@ -249,7 +254,7 @@
         }
         mSel.innerHTML = list.map(function (m) {
           return '<option value="' + U.esc(m.id) + '"' + (keep && m.id === keep ? ' selected' : '') + '>' +
-            U.esc(m.id) + (m.free ? ' ★مجاني' : '') + '</option>';
+            U.esc(m.id) + (m.free ? '   (مجاني)' : '') + '</option>';
         }).join('');
       }
       fillModels(cfg.model);
@@ -266,7 +271,7 @@
       U.$('#aeSave').onclick = function () {
         var tools = U.$$('#modalBox .chk input:checked').map(function (c) { return c.value; });
         var patch = {
-          emoji: U.$('#aeEmoji').value || '🤖',
+          emoji: U.$('#aeEmoji').value || '◆',
           name: U.$('#aeName').value.trim() || 'وكيل',
           providerId: pSel.value,
           model: mSel.value,
@@ -301,14 +306,14 @@
       else {
         U.$('#chatName').textContent = 'لا يوجد وكيل';
         U.$('#chatModel').textContent = 'أنشئ وكيلًا من تبويب الوكلاء';
-        U.$('#chatAvatar').textContent = '🤖';
-        U.$('#chatMessages').innerHTML = '<div class="empty">لا يوجد وكلاء بعد.<br>اذهب إلى تبويب «الوكلاء» وأنشئ وكيلًا 🤖</div>';
+        U.$('#chatAvatar').textContent = 'AI';
+        U.$('#chatMessages').innerHTML = '<div class="empty">لا يوجد وكلاء بعد.<br>اذهب إلى تبويب «الوكلاء» وأنشئ وكيلًا.</div>';
         return;
       }
     }
     var a = App.Agent.get(id);
     var p = P.get(a.providerId);
-    U.$('#chatAvatar').textContent = a.emoji || '🤖';
+    U.$('#chatAvatar').textContent = a.emoji || '◆';
     U.$('#chatName').textContent = a.name;
     U.$('#chatModel').textContent = (p ? p.name : 'بدون مزوّد') + ' · ' + (a.model || '—');
     UI.renderMessages();
@@ -318,7 +323,7 @@
     var box = U.$('#chatMessages');
     var h = App.Agent.history(UI.activeAgentId);
     if (!h.length) {
-      box.innerHTML = '<div class="empty">ابدأ المحادثة ✨<br><span class="small">الوكيل سيستخدم الأدوات تلقائيًا إن احتاج.</span></div>';
+      box.innerHTML = '<div class="empty">ابدأ المحادثة.<br><span class="small">الوكيل سيستخدم الأدوات تلقائيًا إن احتاج.</span></div>';
       return;
     }
     box.innerHTML = '';
@@ -331,7 +336,7 @@
     var d = document.createElement('div');
     if (m.role === 'tool') {
       d.className = 'msg tool';
-      d.innerHTML = '🛠 <b>' + U.esc(m.name || 'أداة') + '</b>' +
+      d.innerHTML = '<b>TOOL</b> · ' + U.esc(m.name || 'أداة') + '</b>' +
         (m.toolArgs ? '<br><span class="small">' + U.esc(JSON.stringify(m.toolArgs)) + '</span>' : '') +
         '<br><span class="small">' + U.esc(U.tail(m.content || '', 600)) + '</span>';
       return d;
@@ -340,7 +345,7 @@
     var body = m.role === 'user' ? U.esc(m.content || '') : UI.md(m.content || '');
     var calls = '';
     if (m.calls && m.calls.length) {
-      calls = '<div class="small muted">🛠 استدعاء: ' + m.calls.map(function (c) { return U.esc(c.name); }).join(', ') + '</div>';
+      calls = '<div class="small muted">TOOL · ' + m.calls.map(function (c) { return U.esc(c.name); }).join(', ') + '</div>';
     }
     d.innerHTML = body + calls;
     return d;
@@ -378,14 +383,14 @@
       onToolStart: function (t) {
         var tb = document.createElement('div');
         tb.className = 'msg tool';
-        tb.innerHTML = '🛠 <b>' + U.esc(t.name) + '</b>… <span class="spin"></span>';
+        tb.innerHTML = '<b>TOOL</b> · ' + U.esc(t.name) + '</b>… <span class="spin"></span>';
         U.$('#chatMessages').insertBefore(tb, bubble);
         scroll();
       },
       onToolEnd: function (t, out) {
         var els = U.$$('#chatMessages .msg.tool');
         var last = els[els.length - 1];
-        if (last) last.innerHTML = '🛠 <b>' + U.esc(t.name) + '</b><br><span class="small">' + U.esc(U.tail(out, 400)) + '</span>';
+        if (last) last.innerHTML = '<b>TOOL</b> · ' + U.esc(t.name) + '</b><br><span class="small">' + U.esc(U.tail(out, 400)) + '</span>';
       }
     }).then(function () {
       UI.finishSend();
