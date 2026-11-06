@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-const PROVIDERS = ["Gmail", "Google Drive", "Slack", "GitHub", "Notion", "Stripe", "Supabase"];
+const PROVIDERS = ["Gmail", "Google Drive", "Slack", "GitHub", "Notion", "Supabase"];
 
 export default function ConnectorsPage() {
   const [connected, setConnected] = useState<Record<string, { on: boolean; readOnly: boolean }>>({});
